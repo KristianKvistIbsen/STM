@@ -4,20 +4,20 @@ from datetime import datetime
 import warnings
 import os
 
-def package_gtm_results(GTM, mesh_data, metadata, results_data, output_file="gtm_computation_results.h5"):
+def package_stm_results(STM, mesh_data, metadata, results_data, output_file="stm_computation_results.h5"):
     """
-    Package GTM computation results into a compressed HDF5 file.
+    Package STM computation results into a compressed HDF5 file.
     
     Parameters:
     -----------
-    GTM : numpy.ndarray
-        Complex GTM matrix with shape (n_coeffs_I, n_coeffs_O, n_frequencies)
+    STM : numpy.ndarray
+        Complex STM matrix with shape (n_coeffs_I, n_coeffs_O, n_frequencies)
     mesh_data : dict
         Dictionary containing mesh information for INTERNAL, EXTERNAL, and FULL_MESH
     metadata : dict
         Dictionary containing user settings, computation parameters, and frequency data
     results_data : dict
-        Dictionary containing GTM, frequencies, export files info, spherical harmonics, and point mappings
+        Dictionary containing STM, frequencies, export files info, spherical harmonics, and point mappings
     output_file : str
         Output filename for the HDF5 file
     
@@ -137,24 +137,24 @@ def package_gtm_results(GTM, mesh_data, metadata, results_data, output_file="gtm
     with h5py.File(output_file, 'w') as f:
         # Add file metadata
         f.attrs['creation_date'] = datetime.now().isoformat()
-        f.attrs['file_format'] = 'GTM_Results_HDF5'
+        f.attrs['file_format'] = 'STM_Results_HDF5'
         f.attrs['version'] = '1.0'
         
-        # Save GTM matrix (main result)
-        gtm_group = f.create_group('GTM_Matrix')
-        if np.iscomplexobj(GTM):
-            complex_dtype = np.dtype([('real', GTM.real.dtype), ('imag', GTM.imag.dtype)])
-            complex_data = np.empty(GTM.shape, dtype=complex_dtype)
-            complex_data['real'] = GTM.real
-            complex_data['imag'] = GTM.imag
-            gtm_group.create_dataset('GTM', data=complex_data, 
+        # Save STM matrix (main result)
+        stm_group = f.create_group('STM_Matrix')
+        if np.iscomplexobj(STM):
+            complex_dtype = np.dtype([('real', STM.real.dtype), ('imag', STM.imag.dtype)])
+            complex_data = np.empty(STM.shape, dtype=complex_dtype)
+            complex_data['real'] = STM.real
+            complex_data['imag'] = STM.imag
+            stm_group.create_dataset('STM', data=complex_data, 
                                    compression='gzip', compression_opts=9)
         else:
-            gtm_group.create_dataset('GTM', data=GTM, 
+            stm_group.create_dataset('STM', data=STM, 
                                    compression='gzip', compression_opts=9)
         
-        gtm_group.attrs['shape'] = GTM.shape
-        gtm_group.attrs['dtype'] = str(GTM.dtype)
+        stm_group.attrs['shape'] = STM.shape
+        stm_group.attrs['dtype'] = str(STM.dtype)
         
         # Save mesh data
         mesh_group = f.create_group('Mesh_Data')
@@ -205,20 +205,20 @@ def package_gtm_results(GTM, mesh_data, metadata, results_data, output_file="gtm
         
         f.attrs['n_datasets'] = count_datasets(f)
     
-    print(f"GTM results successfully packaged to: {output_file}")
+    print(f"STM results successfully packaged to: {output_file}")
     print(f"File size: {os.path.getsize(output_file) / 1024 / 1024:.2f} MB")
     
     return output_file
 
 
-def load_gtm_results(input_file):
+def load_stm_results(input_file):
     """
-    Load GTM computation results from HDF5 file.
+    Load STM computation results from HDF5 file.
     
     Parameters:
     -----------
     input_file : str
-        Path to the HDF5 file containing GTM results
+        Path to the HDF5 file containing STM results
     
     Returns:
     --------
@@ -336,8 +336,11 @@ def load_gtm_results(input_file):
         return result
     
     with h5py.File(input_file, 'r') as f:
-        # Load main GTM matrix
-        gtm_data = load_complex_dataset(f['GTM_Matrix/GTM'])
+        # Load main STM matrix (fall back to the legacy 'GTM_Matrix' key for older files)
+        if 'STM_Matrix/STM' in f:
+            stm_data = load_complex_dataset(f['STM_Matrix/STM'])
+        else:
+            stm_data = load_complex_dataset(f['GTM_Matrix/GTM'])
         
         # Load mesh data with grid reconstruction
         mesh_data = {}
@@ -373,7 +376,7 @@ def load_gtm_results(input_file):
         }
     
     return {
-        'GTM': gtm_data,
+        'STM': stm_data,
         'mesh_data': mesh_data,
         'metadata': metadata,
         'results_data': results_data,
@@ -384,7 +387,7 @@ def load_gtm_results(input_file):
 # Example usage:
 if __name__ == "__main__":
     # Example of how to use the function
-    print("GTM Results Packaging Function")
+    print("STM Results Packaging Function")
     print("Usage:")
-    print("package_gtm_results(GTM, mesh_data, metadata, results_data, 'output.h5')")
-    print("loaded_data = load_gtm_results('output.h5')")
+    print("package_stm_results(STM, mesh_data, metadata, results_data, 'output.h5')")
+    print("loaded_data = load_stm_results('output.h5')")

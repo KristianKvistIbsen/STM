@@ -1,7 +1,8 @@
 import kdpf
 import pySDEM
-import pyGTM
+import pySTM
 import numpy as np
+from scipy.spatial import cKDTree
 import pyshtools as pysh
 from ansys.dpf import core as dpf
 import os
@@ -11,19 +12,29 @@ from ansys.mechanical.core import connect_to_mechanical
 
 model_folder = None  # Defaults to dp0/MECH of system if None
 pressure_export_folder = None  # Defaults to model_folder if None
-INTERNAL_NS = 'GAMMA_I'
-EXTERNAL_NS = 'GAMMA_E'
-nCores = 64
-lmax_I = 4
+INTERNAL_NS = 'GI'
+EXTERNAL_NS = 'GE'
+
+STM_NAME = "STM"
+
+nCores = 6
+lmax_I = 1
 lmax_O = 60
-workbench_server_port = 54201 # StartServer() to retrieve port
+workbench_server_port = 42924 # StartServer() to retrieve port
 workbench_server_ip = None
 
 SHRINK_WRAP_STL_INTERNAL = None
-SHRINK_WRAP_STL_EXTERNAL = None #r"N:/PhD/generalized_transfer_matrix/NEBULA_DF_24_STL_5.stl"
+SHRINK_WRAP_STL_EXTERNAL = None
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 
+# --- Mode-superposition (MSUP) settings ---------------------------------------
+# The Modal + MSUP Harmonic systems are set up manually in Workbench (see module
+# docstring). Nothing to configure here beyond pointing systemName at the harmonic.
+
 # Pressure File Import Settings
+# systemName = the HARMONIC (Mode-Superposition) system in Workbench. Mechanical connects
+# here and imported pressures target it; set it to whichever of "SYS" / "SYS 1" is your
+# Harmonic Response system. The Modal analysis is auto-detected in the shared model.
 systemName = "SYS"
 DataExtension = "csv"
 DelimiterIs = "Comma"
@@ -41,11 +52,30 @@ mechPort = workbench.start_mechanical_server(systemName)
 mechanical = connect_to_mechanical(ip='localhost', port=mechPort)
 
 
+# The Workbench system name does not necessarily match its dp0 solver-files folder
+# (e.g. system "SYS" can solve into dp0\SYS-1\MECH). Ask the harmonic analysis for its
+# actual working directory instead of building the path from systemName.
 if model_folder is None:
-    model_folder = os.path.join(mechanical.project_directory, "dp0", systemName, "MECH")
+    model_folder = mechanical.run_python_script("""
+model = ExtAPI.DataModel.Project.Model
+harmonics = [a for a in model.Analyses if "Harmonic" in a.AnalysisType.ToString()]
+if len(harmonics) == 0:
+    raise Exception("No Harmonic Response analysis found in the shared Mechanical model.")
+h = harmonics[0]
+_wd = None
+for _attr in ["WorkingDir", "SolverFilesDirectory"]:
+    if hasattr(h, _attr):
+        _wd = getattr(h, _attr)
+        break
+if _wd is None or str(_wd) == "":
+    raise Exception("Could not determine the harmonic solver files directory (no WorkingDir/SolverFilesDirectory).")
+str(_wd)
+""")
+    model_folder = os.path.normpath(model_folder.strip())
+    print(f"Harmonic solver files directory: {model_folder}")
 
 if pressure_export_folder is None:
-    pressure_export_folder = os.path.join(mechanical.project_directory, "dp0", systemName, "MECH","GTM_pressures")
+    pressure_export_folder = os.path.join(model_folder, "STM_pressures")
 os.makedirs(pressure_export_folder, exist_ok=True)
 
 
@@ -114,17 +144,19 @@ def stl_to_dpf_mesh(stl_path):
         num_elements=connectivity.shape[0]
     )
     print("Warning: scaling factor of 1000 used to convert from mm to m")
-    for i, coord in enumerate(coordinates, start=0):
-        meshed_region.nodes.add_node(i, coord / 1000)
+    scaled_coordinates = coordinates / 1000.0
+    for i in range(len(scaled_coordinates)):
+        meshed_region.nodes.add_node(i, scaled_coordinates[i])
 
-    for i, face in enumerate(connectivity, start=0):
-        meshed_region.elements.add_element(i, "shell", face.tolist())
+    faces_list = connectivity.tolist()
+    for i, face in enumerate(faces_list):
+        meshed_region.elements.add_element(i, "shell", face)
     return meshed_region, mesh.area_faces
 
 
 def generate_spherical_harmonics(lmax, points, lat, lon):
     """Generate spherical harmonics for given lmax and points."""
-    n_harmonics = (lmax + 1) ** 2
+    n_harmonics = (lmax + 1) ** 2 - 1  # l=0 monopole is handled separately
     n_points = len(points)
     sh_array = np.zeros((n_points, n_harmonics), dtype=np.complex128)
     harm_idx = 0
@@ -225,8 +257,16 @@ setup2.Edit()
 """
     workbench.run_script_string(external_commands)
 
-def solve_model(mechanical, filename, fileid, internal_ns, external_ns, n_cores, model_folder):
-    """Solve the model for a given harmonic file."""
+
+def solve_model(mechanical, filename, fileid, internal_ns, external_ns, model_folder, gammaO, normals, tfreq):
+    """Solve one harmonic load case (now a cheap MSUP solve) and extract normal velocity.
+
+    The harmonic analysis is mode-superposition, so ``analysis.Solve`` reuses the
+    already-solved modal basis; clearing the harmonic's generated data afterwards does
+    not invalidate the upstream modal. Geometry-dependent quantities (skin mesh
+    ``gammaO``, ``normals`` and the frequency support ``tfreq``) are precomputed once
+    and reused across all harmonics.
+    """
     map_commands = f"""
 import re
 wbAnalysisName = "TARGET: HansenAutoImporter"
@@ -247,8 +287,7 @@ with Transaction():
     table[0][2] = 1
     importedPres.ImportLoad()
 """
-    solve_commands = f"""
-analysis.SolveConfiguration.SolveProcessSettings.MaxNumberOfCores = {n_cores}
+    solve_commands = """
 analysis.Solve(True)
 analysis.Solution.GetResults()
 """
@@ -270,9 +309,6 @@ with Transaction():
     mechanical.wait_till_mechanical_is_ready()
 
     model = dpf.Model(model_folder + r"\file.rst")
-    tfreq = kdpf.get_tfreq(model)
-    gammaO = kdpf.get_skin_mesh_from_ns(external_ns, model)
-    normals = kdpf.get_normals(gammaO)
     vn = kdpf.get_normal_velocities(model, gammaO, tfreq, normals)
 
     model.metadata.release_streams()
@@ -280,8 +316,14 @@ with Transaction():
     mechanical.wait_till_mechanical_is_ready()
     return vn, gammaO, tfreq
 
+# The monopole (Y_0_0) is the first load case. The modal analysis must already be solved
+# manually in Workbench. The harmonic is located by analysis type in the shared model.
 monopole_solve_command = f"""
-analysis = ExtAPI.DataModel.Project.Model.Analyses[0]
+model = ExtAPI.DataModel.Project.Model
+harmonics = [a for a in model.Analyses if "Harmonic" in a.AnalysisType.ToString()]
+if len(harmonics) == 0:
+    raise Exception("No Harmonic Response analysis found in the shared Mechanical model.")
+analysis = harmonics[0]
 monopole_pressure = analysis.AddPressure()
 named_selection = ExtAPI.DataModel.GetObjectsByName("{INTERNAL_NS}")[0]
 monopole_pressure.Location = named_selection
@@ -298,6 +340,11 @@ analysis.ClearGeneratedData()
 """
 
 
+# ============================================================================
+# Solve the monopole (Y_0_0) as the first MSUP harmonic load case. The Modal + MSUP
+# Harmonic systems must already be set up AND the modal solved manually in Workbench;
+# this script only solves the harmonic load cases.
+# ============================================================================
 mechanical.run_python_script(monopole_solve_command)
 mechanical.wait_till_mechanical_is_ready()
 
@@ -364,28 +411,37 @@ mechanical.wait_till_mechanical_is_ready()
 # Import data to Workbench
 setup_external_data(workbench, systemName, pressure_export_folder, allfiles)
 
-# Solve model for each harmonic
+# Set the solve core count once; it persists across all harmonic solves
+set_cores_command = f"""
+wbAnalysisName = "TARGET: HansenAutoImporter"
+for item in ExtAPI.DataModel.AnalysisList:
+    if item.SystemCaption == wbAnalysisName:
+        analysis = item
+analysis.SolveConfiguration.SolveProcessSettings.MaxNumberOfCores = {nCores}
+"""
+mechanical.run_python_script(set_cores_command)
+mechanical.wait_till_mechanical_is_ready()
 
+# Solve each harmonic as a cheap MSUP load case (modal basis is reused, skin mesh /
+# normals / tfreq reused across solves)
 for fileid, filename in enumerate(allfiles, 1):
-    vn, gammaO, tfreq = solve_model(mechanical, filename, fileid, INTERNAL_NS, EXTERNAL_NS, nCores, model_folder)
+    vn, gammaO, tfreq = solve_model(mechanical, filename, fileid, INTERNAL_NS, EXTERNAL_NS, model_folder, gammaO_from_ansys, normals, tfreq)
     if mapping_workflow_external is not None:
         mapping_workflow_external.connect('source',vn)
         vn = mapping_workflow_external.get_output('target', output_type="fields_container")
     vn_list.append(vn)
     print(f"Solved for {filename}")
 
-# %%
-
-
 
 print("Calculating STM")
 N_frequencies = len(tfreq.data)
 N_points = len(lat_gammaO)
 
-point_mapping_gammaO = [np.argmin(np.linalg.norm(original_points_gammaO - cp, axis=1)) for cp in v_gammaO]
+# Nearest-neighbour map from cleaned/SDEM node order back to the original skin node order
+_, point_mapping_gammaO = cKDTree(original_points_gammaO).query(v_gammaO)
 n_coeffs_I = (lmax_I + 1) ** 2
 n_coeffs_O = (lmax_O + 1) ** 2
-GTM = np.zeros([n_coeffs_I, n_coeffs_O, len(tfreq.data)], dtype=np.complex128)
+STM = np.zeros([n_coeffs_I, n_coeffs_O, len(tfreq.data)], dtype=np.complex128)
 G = pysh.expand.LSQ_G(lat_gammaO,lon_gammaO,lmax_O)
 
 
@@ -393,10 +449,10 @@ G = pysh.expand.LSQ_G(lat_gammaO,lon_gammaO,lmax_O)
 B_large = np.zeros((N_points, n_coeffs_I * N_frequencies), dtype=complex)
 for fileid in range(n_coeffs_I):
     vn = vn_list[fileid]
-    for freqid in range(N_frequencies):
-        real_part = vn[2 * freqid].data[point_mapping_gammaO]
-        imag_part = vn[2 * freqid + 1].data[point_mapping_gammaO]
-        B_large[:, fileid * N_frequencies + freqid] = real_part + 1j * imag_part
+    # Fetch all real/imag velocity fields once, then reorder to SDEM node order
+    field_data = np.array([vn[i].data for i in range(2 * N_frequencies)])
+    block = field_data[0::2][:, point_mapping_gammaO] + 1j * field_data[1::2][:, point_mapping_gammaO]
+    B_large[:, fileid * N_frequencies:(fileid + 1) * N_frequencies] = block.T
 
 print("B_large constructed --> LSQ Solve started")
 # Solve the least-squares problem once
@@ -404,19 +460,16 @@ X_large, residuals_large, _, _ = np.linalg.lstsq(G, B_large, rcond=None)
 print("Done --> Unpacking")
 
 
-# Initialize GTM and error array
-GTM = np.zeros((n_coeffs_I, n_coeffs_O, N_frequencies), dtype=complex)
-abs_error = np.zeros((n_coeffs_I, N_frequencies)) 
-rel_error = np.zeros((n_coeffs_I, N_frequencies))
+# Unpack X_large into STM (columns are ordered fileid-major, freqid-minor)
+STM = X_large.T.reshape(n_coeffs_I, N_frequencies, n_coeffs_O).transpose(0, 2, 1)
 
-# Unpack X_large into GTM and compute errors
-for fileid in range(n_coeffs_I):
-    for freqid in range(N_frequencies):
-        col_idx = fileid * N_frequencies + freqid
-        GTM[fileid, :, freqid] = X_large[:, col_idx]
-        abs_error[fileid, freqid] = np.sqrt(residuals_large[col_idx]) if residuals_large.size > 0 else 0.0
-        b_norm = np.linalg.norm(B_large[:, col_idx])
-        rel_error[fileid, freqid] = abs_error[fileid, freqid] / b_norm if b_norm > 0 else 0.0
+# Compute absolute and relative residual errors directly. np.linalg.lstsq only returns
+# residuals when G is full-rank AND overdetermined; the lmax_O fit is typically
+# rank-deficient, which previously left the error arrays silently at zero.
+residual = G @ X_large - B_large
+abs_error = np.linalg.norm(residual, axis=0).reshape(n_coeffs_I, N_frequencies)
+b_norms = np.linalg.norm(B_large, axis=0).reshape(n_coeffs_I, N_frequencies)
+rel_error = np.divide(abs_error, b_norms, out=np.zeros_like(abs_error), where=b_norms > 0)
 
 print("Done")
 
@@ -443,7 +496,8 @@ metadata = {
     'user_settings': {
         'model_folder': model_folder, 'INTERNAL_NS': INTERNAL_NS, 'EXTERNAL_NS': EXTERNAL_NS,
         'lmax_I': lmax_I, 'lmax_O': lmax_O, 'nCores': nCores,
-        'workbench_server_port': workbench_server_port, 'workbench_server_ip': workbench_server_ip
+        'workbench_server_port': workbench_server_port, 'workbench_server_ip': workbench_server_ip,
+        'solution_method': 'MSUP'
     },
     'pressure_file_settings': {
         'systemName': systemName, 'DataExtension': DataExtension, 'DelimiterIs': DelimiterIs,
@@ -464,7 +518,7 @@ metadata = {
 }
 
 results_data = {
-    'GTM': GTM,
+    'STM': STM,
     'G': G,
     'frequencies': tfreq.data,
     'export_files': {'harmonic_files': allfiles, 'n_files_exported': len(allfiles), 'file_pattern': 'Y_l_m.csv'},
@@ -477,5 +531,5 @@ results_data = {
 }
 
 # Package results
-pyGTM.package_gtm_results(GTM=GTM, mesh_data=mesh_data, metadata=metadata, results_data=results_data,
-                   output_file="scala_l4_with_error.h5")
+pySTM.package_stm_results(STM=STM, mesh_data=mesh_data, metadata=metadata, results_data=results_data,
+                   output_file=STM_NAME+".h5")

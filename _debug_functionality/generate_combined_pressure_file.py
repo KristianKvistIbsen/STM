@@ -6,14 +6,14 @@ Created on Tue Sep  9 12:31:16 2025
 """
 
 import numpy as np
-import pyGTM
+import pySTM
 import pySDEM
 import pyshtools as pysh
 
 # Load in data ================================================================
-loaded_data = pyGTM.load_gtm_results(r"N:\PhD\GTM\upm10_stm\upm10_l4_60.h5")
+loaded_data = pySTM.load_stm_results(r"N:\PhD\GTM\upm10_stm\upm10_l4_60.h5")
 n_coeffs_I = loaded_data["metadata"]["computation_parameters"]["n_coeffs_I"]
-GTM = loaded_data["GTM"]
+STM = loaded_data["STM"]
 G = loaded_data["results_data"]["G"]
 lmax_O = int(loaded_data["metadata"]["user_settings"]["lmax_O"])
 areas = loaded_data["mesh_data"]["EXTERNAL"]["mesh_metadata"]["areas"]   

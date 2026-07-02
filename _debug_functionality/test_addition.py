@@ -1,5 +1,5 @@
 import numpy as np
-import pyGTM
+import pySTM
 import pySDEM
 import pyshtools as pysh
 import pyvista as pv
@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 
 
 # Load in data ================================================================
-loaded_data = pyGTM.load_gtm_results(r"N:/PhD/GTM/h5 files/4paper/simple.h5")
+loaded_data = pySTM.load_stm_results(r"N:/PhD/GTM/h5 files/4paper/simple.h5")
 n_coeffs_I = loaded_data["metadata"]["computation_parameters"]["n_coeffs_I"]
-GTM = loaded_data["GTM"]
+STM = loaded_data["STM"]
 G = loaded_data["results_data"]["G"]
 lmax_O = int(loaded_data["metadata"]["user_settings"]["lmax_O"])
 areas = loaded_data["mesh_data"]["EXTERNAL"]["mesh_metadata"]["areas"]   

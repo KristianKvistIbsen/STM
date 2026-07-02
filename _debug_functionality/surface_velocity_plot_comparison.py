@@ -3,14 +3,14 @@ import pyvista as pv
 import matplotlib.pyplot as plt
 import kdpf
 import pySDEM
-import pyGTM
+import pySTM
 import pyshtools as pysh
 from ansys.dpf import core as dpf
 
 
-loaded_data = pyGTM.load_gtm_results(r"N:/PhD/GTM/h5 files/4paper/scala_l4_with_error_lo80.h5")
+loaded_data = pySTM.load_stm_results(r"N:/PhD/GTM/h5 files/4paper/scala_l4_with_error_lo80.h5")
 n_coeffs_I = loaded_data["metadata"]["computation_parameters"]["n_coeffs_I"]
-GTM = loaded_data["GTM"]
+STM = loaded_data["STM"]
 G = loaded_data["results_data"]["G"]
 lmax_O = int(loaded_data["metadata"]["user_settings"]["lmax_O"])
 areas = loaded_data["mesh_data"]["EXTERNAL"]["mesh_metadata"]["areas"]   
@@ -28,7 +28,7 @@ excitation_response[1] = 1 #Y1-1
 excitation_response[2] = 2j #Y10
 excitation_response[3] = 1-1j #Y11
 
-synthesized_response_clm1d = np.einsum('ijk,i->jk', GTM, excitation_response)
+synthesized_response_clm1d = np.einsum('ijk,i->jk', STM, excitation_response)
 synthesized_velocity = G @ synthesized_response_clm1d
 
 
@@ -45,7 +45,7 @@ vn = kdpf.get_normal_velocities(model, gammaO, tfreq, normals)
 freq_idx = 150
 plotter = pv.Plotter(shape=(1, 3))
 
-# GTM
+# STM
 plotter.subplot(0, 0)
 field_synth = np.real(synthesized_velocity[:, freq_idx])
 mesh_synth = grid_gammaO.copy()
