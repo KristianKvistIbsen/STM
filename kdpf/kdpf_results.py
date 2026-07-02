@@ -19,3 +19,20 @@ def get_normal_velocities(model,skin_mesh,tfreq,nodal_normals):
     opDot.inputs.field_or_fields_container_A.connect(op_velocities)
     opDot.inputs.field_or_fields_container_B.connect(nodal_normals)
     return opDot.outputs.fields_container()
+
+
+def get_normal_displacements(model, skin_mesh, tfreq, nodal_normals):
+    # Get xyz displacements at all nodal locations on skin mesh. For a modal analysis,
+    # `tfreq` scopes over all extracted modes, so this yields one (real) mode-shape
+    # displacement field per mode.
+    op_disp = dpf.operators.result.displacement()
+    op_disp.inputs.time_scoping.connect(tfreq)
+    op_disp.inputs.mesh_scoping.connect(skin_mesh.nodes.scoping)
+    op_disp.inputs.data_sources.connect(model)
+    op_disp.inputs.mesh.connect(skin_mesh)
+
+    # Get nodal normal displacements on skin mesh by dot product with the nodal normals
+    opDot = dpf.operators.math.generalized_inner_product_fc()
+    opDot.inputs.field_or_fields_container_A.connect(op_disp)
+    opDot.inputs.field_or_fields_container_B.connect(nodal_normals)
+    return opDot.outputs.fields_container()

@@ -20,7 +20,7 @@ STM_NAME = "STM"
 nCores = 6
 lmax_I = 1
 lmax_O = 60
-workbench_server_port = 42924 # StartServer() to retrieve port
+workbench_server_port = 1045 # StartServer() to retrieve port
 workbench_server_ip = None
 
 SHRINK_WRAP_STL_INTERNAL = None
@@ -497,7 +497,8 @@ metadata = {
         'model_folder': model_folder, 'INTERNAL_NS': INTERNAL_NS, 'EXTERNAL_NS': EXTERNAL_NS,
         'lmax_I': lmax_I, 'lmax_O': lmax_O, 'nCores': nCores,
         'workbench_server_port': workbench_server_port, 'workbench_server_ip': workbench_server_ip,
-        'solution_method': 'MSUP'
+        'solution_method': 'MSUP',
+        'input_basis': 'spherical_harmonics'  # <--- ADDED FLAG
     },
     'pressure_file_settings': {
         'systemName': systemName, 'DataExtension': DataExtension, 'DelimiterIs': DelimiterIs,
@@ -522,14 +523,28 @@ results_data = {
     'G': G,
     'frequencies': tfreq.data,
     'export_files': {'harmonic_files': allfiles, 'n_files_exported': len(allfiles), 'file_pattern': 'Y_l_m.csv'},
-    'spherical_harmonics': {'spherical_harmonics_array': spherical_harmonics_array, 'n_harmonics': n_harmonics,
-                            'lmax_I': lmax_I, 'lmax_O': lmax_O},
     'point_mappings': {'point_mapping': np.array(point_mapping_gammaO), 'n_original_points': len(original_points_gammaO),
                        'n_cleaned_points': len(v_gammaO)},
     'error_data': {
-        'abs_error': abs_error,'rel_error':rel_error}
+        'abs_error': abs_error, 'rel_error': rel_error}
 }
 
+sh_labels = []
+for l in range(lmax_I + 1):
+    for m in range(-l, l + 1):
+        sh_labels.append(f"Y_{l}_{m}")
+
+monopole = np.ones((spherical_harmonics_array.shape[0], 1), dtype=np.complex128)
+full_basis_array = np.hstack((monopole, spherical_harmonics_array))
+
+results_data['input_basis'] = {
+    'type': 'spherical_harmonics',
+    'labels': sh_labels,                            # <--- ADDED
+    'n_coeffs_I': n_coeffs_I,
+    'basis_vectors': full_basis_array,
+    'gammaI_points': v_gammaI,
+    'lmax_I': lmax_I
+}
 # Package results
 pySTM.package_stm_results(STM=STM, mesh_data=mesh_data, metadata=metadata, results_data=results_data,
                    output_file=STM_NAME+".h5")
