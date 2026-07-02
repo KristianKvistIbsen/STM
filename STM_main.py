@@ -394,6 +394,18 @@ vn = kdpf.get_normal_velocities(model, gammaO_from_ansys, tfreq, normals)
 if mapping_workflow_external is not None:
     mapping_workflow_external.connect('source',vn)
     vn = mapping_workflow_external.get_output('target', output_type="fields_container")
+    
+    
+    #----------------------------ATTEMPT AT ENFORCING ZERO VN WHERE THERE IS NO MESH UNDER MAPPING
+    vn = enforce_zero_outside_radius(
+        mapped_fc=vn, 
+        source_mesh=gammaO_from_ansys, 
+        target_mesh=gammaO, 
+        filter_radius=SHRINK_WRAP_MAP_FILTER_RADIUS
+    )
+    
+    
+    
 vn_list = []
 vn_list.append(vn)
 model.metadata.release_streams()

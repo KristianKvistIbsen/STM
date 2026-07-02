@@ -11,6 +11,7 @@ import numpy as np
 import trimesh
 import pyshtools as pysh
 from ansys.dpf import core as dpf
+from scipy.spatial import cKDTree
 
 import kdpf
 
@@ -87,6 +88,33 @@ def check_genus_zero_and_map_if_needed(mesh, mesh_name, stl_path=None, filter_ra
             return stl_mesh, mapping_workflow
         else:
             raise ValueError(f'{mesh_name} mesh is not genus-0, and no STL file provided for shrink-wrapping.')
+
+def enforce_zero_outside_radius(mapped_fc, source_mesh, target_mesh, filter_radius):
+    """
+    Takes a mapped FieldsContainer, rescopes it to the target mesh, and 
+    explicitly sets the value to 0.0 for any node that is further than 
+    filter_radius from ANY node in the original source mesh.
+    """
+    # 1. First, rescope the mapped container so it matches the full target mesh
+    target_scoping = target_mesh.nodes.scoping
+    rescope_op = dpf.operators.scoping.rescope_fc()
+    rescope_op.inputs.fields_container.connect(mapped_fc)
+    rescope_op.inputs.mesh_scoping.connect(target_scoping)
+    rescope_op.inputs.default_value.connect(0.0)
+    full_fc = rescope_op.outputs.fields_container()
+    
+    source_coords = source_mesh.nodes.coordinates_field.data
+    target_coords = target_mesh.nodes.coordinates_field.data
+    
+    tree = cKDTree(source_coords)
+    
+    distances, _ = tree.query(target_coords)
+    
+    outside_mask = distances > filter_radius
+    
+    for field in full_fc:
+        field.data[outside_mask] = 0.0
+    return full_fc
 
 
 def generate_spherical_harmonics(lmax, points, lat, lon):

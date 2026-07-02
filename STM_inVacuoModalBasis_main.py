@@ -11,6 +11,7 @@ import pySDEM
 import pySTM
 from stm_core import (
     check_genus_zero_and_map_if_needed,
+    enforce_zero_outside_radius,
     export_named_fields,
     setup_external_data,
     solve_model,
@@ -21,15 +22,15 @@ pressure_export_folder = None # Pressure files are placed in ANSYS system folder
 INTERNAL_NS = 'GI' # Named selection of pressure loaded surface
 EXTERNAL_NS = 'GE' # Named selection of external sound radiating surface
 
-STM_NAME = "STM_inVacuoModalBasis1" # Name of exported STM file
+STM_NAME = "STM_TP_MODAL" # Name of exported STM file
 
-nCores = 6 # N_cores to use when solving
+nCores = 8 # N_cores to use when solving
 lmax_O = 60                      # output (GammaO) spherical-harmonic fitting degree
 workbench_server_port = 1045    # StartServer() to retrieve port
 workbench_server_ip = None 
 
 SHRINK_WRAP_STL_INTERNAL = None
-SHRINK_WRAP_STL_EXTERNAL = None
+SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap.stl"
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 
 # --- In-vacuo modal-basis settings --------------------------------------------
@@ -38,7 +39,7 @@ SVD_REL_TOL = 1e-6         # drop basis vectors with singular value < SVD_REL_TO
 N_BASIS_MAX = 1         # optional hard cap on the number of retained basis vectors
 
 # Pressure File Import Settings
-systemName = "SYS"
+systemName = "SYS 1"
 DataExtension = "csv"
 DelimiterIs = "Comma"
 DelimiterStringIs = ","
@@ -207,6 +208,15 @@ for fileid, filename in enumerate(allfiles, 1):
     if mapping_workflow_external is not None:
         mapping_workflow_external.connect('source', vn)
         vn = mapping_workflow_external.get_output('target', output_type="fields_container")
+        
+        #----------------------------ATTEMPT AT ENFORCING ZERO VN WHERE THERE IS NO MESH UNDER MAPPING
+        vn = enforce_zero_outside_radius(
+            mapped_fc=vn, 
+            source_mesh=gammaO_from_ansys, 
+            target_mesh=gammaO, 
+            filter_radius=SHRINK_WRAP_MAP_FILTER_RADIUS
+        )
+    
     vn_list.append(vn)
     print(f"Solved for {filename}")
 
