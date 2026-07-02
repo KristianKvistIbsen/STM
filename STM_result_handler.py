@@ -200,6 +200,8 @@ class STMSynthesizer:
         --------
         excitation : ndarray, shape (n_coeffs_I,)
             The input excitation vector ready to be passed to `radiated_power()` or `synthesize_velocity()`.
+        error_percent : float
+            The relative L2 reconstruction error of the projection in percent.
         """
         if self.input_basis_vectors.size == 0:
             raise ValueError("Basis vectors are not stored in this STM file. Cannot project pressure.")
@@ -212,8 +214,19 @@ class STMSynthesizer:
             )
             
         # Least squares projection onto the basis: [Basis] * c = p
-        coeffs, residuals, rank, s = np.linalg.lstsq(self.input_basis_vectors, p, rcond=None)
-        return coeffs
+        coeffs, _, _, _ = np.linalg.lstsq(self.input_basis_vectors, p, rcond=None)
+        
+        # Calculate the reconstructed pressure to find the true relative error
+        p_recon = self.input_basis_vectors @ coeffs
+        
+        # Calculate error in percent (handle perfectly zero pressure fields safely)
+        p_norm = np.linalg.norm(p)
+        if p_norm == 0:
+            error_percent = 0.0
+        else:
+            error_percent = (np.linalg.norm(p_recon - p) / p_norm) * 100.0
+            
+        return coeffs, error_percent
 
     def _as_excitation(self, excitation):
         e = np.asarray(excitation, dtype=np.complex128).ravel()
@@ -359,22 +372,56 @@ class STMSynthesizer:
 if __name__ == "__main__":
     import sys
 
-    path = sys.argv[1] if len(sys.argv) > 1 else r"C:/01_gitrepos/STM/STM_inVacuoModalBasis.h5"
+    path = sys.argv[1] if len(sys.argv) > 1 else r"C:/01_gitrepos/STM/STM_TP_MODAL.h5"
     stm = STMSynthesizer(path)
     print(stm)
     
     # 2. Test Array Excitation (using explicit numpy array)
     mock_coeffs = np.zeros(stm.n_coeffs_I, dtype=np.complex128)
-    mock_coeffs[0] = 100.0
+    mock_coeffs[1] = 100.0
     
-    exc_from_arr = stm.excitation_from_array(mock_coeffs)
-    power_arr = stm.radiated_power(exc_from_arr)
-    print(f"Power via Array Excitation (first 5 freqs, dB): {np.round(power_arr['total_db'][:5], 2)}")
+# %%
+# 2. Test Array Excitation (using explicit numpy array)
+mock_coeffs = np.zeros(stm.n_coeffs_I, dtype=np.complex128)
+mock_coeffs[0] = 100.0
+exc = stm.excitation_from_array(mock_coeffs)
+fig = stm.figure_power_spectrum(exc)
+fig.show(renderer="browser")    
+# %%
 
-    # 3. Test Pressure Field Projection
-    if stm.gammaI_points.size > 0:
-        # Create a mock pressure field on GammaI (e.g. static pressure of 100 Pa)
-        mock_pressure = np.full(stm.gammaI_points.shape[0], 100.0 + 0j)
-        exc_from_p = stm.excitation_from_pressure(mock_pressure)
-        power_p = stm.radiated_power(exc_from_p)
-        print(f"Power via Least Squares Projection (first 5 freqs, dB): {np.round(power_p['total_db'][:5], 2)}")
+
+mock_pressure = np.full(stm.gammaI_points.shape[0], 100.0 + 100j)
+exc_from_p, error_percent = stm.excitation_from_pressure(mock_pressure)
+
+
+# %%
+
+n_points = stm.gammaI_points.shape[0]
+        
+# Generate random real and imaginary components between -100 and 100
+p_real = np.random.uniform(-100.0, 100.0, size=n_points)
+p_imag = np.random.uniform(-100.0, 100.0, size=n_points)
+
+# Combine them into a complex array
+random_pressure = p_real + 1j * p_imag
+
+# Project onto the basis and get the percentage error
+exc_from_p, error_pct = stm.excitation_from_pressure(random_pressure)
+
+
+
+# %%
+
+
+
+# exc_from_arr = stm.excitation_from_array(mock_coeffs)
+# power_arr = stm.radiated_power(exc_from_arr)
+# print(f"Power via Array Excitation (first 5 freqs, dB): {np.round(power_arr['total_db'][:5], 2)}")
+
+# # 3. Test Pressure Field Projection
+# if stm.gammaI_points.size > 0:
+#     # Create a mock pressure field on GammaI (e.g. static pressure of 100 Pa)
+#     mock_pressure = np.full(stm.gammaI_points.shape[0], 100.0 + 0j)
+#     exc_from_p, residuals = stm.excitation_from_pressure(mock_pressure)
+#     power_p = stm.radiated_power(exc_from_p)
+#     print(f"Power via Least Squares Projection (first 5 freqs, dB): {np.round(power_p['total_db'][:5], 2)}")

@@ -36,7 +36,7 @@ SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 # --- In-vacuo modal-basis settings --------------------------------------------
 AREA_WEIGHTED_SVD = True   # orthonormalise in the surface-L2 (area-weighted) inner product
 SVD_REL_TOL = 1e-6         # drop basis vectors with singular value < SVD_REL_TOL * largest
-N_BASIS_MAX = 1         # optional hard cap on the number of retained basis vectors
+N_BASIS_MAX = 10         # optional hard cap on the number of retained basis vectors
 
 # Pressure File Import Settings
 systemName = "SYS 1"
@@ -261,7 +261,7 @@ print("Done")
 mesh_data = {
     'INTERNAL': {
         'InternalGrid': gammaI_skin.grid,
-        'SDEM_Coordinates': None,  # <--- ADDED FOR SCHEMA PARITY
+        'SDEM_Coordinates': None,
         'mesh_metadata': {'nnodes': gammaI_skin.grid.n_points, 'nelements': gammaI_skin.grid.n_cells, 'areas': w}
     },
     'EXTERNAL': {
