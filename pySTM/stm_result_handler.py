@@ -24,6 +24,13 @@ def _import_go():
         ) from exc
     return go
 
+def _import_make_subplots():
+    """Lazily import make_subplots."""
+    try:
+        from plotly.subplots import make_subplots
+    except ImportError as exc:
+        raise ImportError("plotly is required. Install it with 'pip install plotly'.") from exc
+    return make_subplots
 
 class STMSynthesizer:
     """Load an STM result file and synthesise responses, spectra and fields."""
@@ -171,74 +178,27 @@ class STMSynthesizer:
         l = int(np.floor(np.sqrt(idx)))
         return l, idx - l * l - l
 
-    # -------------------------------------------------------- excitation builders
-    def zero_excitation(self):
-        return np.zeros(self.n_coeffs_I, dtype=np.complex128)
-
-    def excitation_from_array(self, coeffs_array):
-        """
-        Build an excitation vector directly from an array of coefficients.
-        
-        Parameters:
-        -----------
-        coeffs_array : array-like, shape (n_coeffs_I,)
-            The complex coefficients for each mode in order.
-            E.g. np.array([1+1j, 0, 0, 2])
-        """
-        return self._as_excitation(coeffs_array)
-
-    def excitation_from_pressure(self, pressure_field):
-        """
-        Decompose a physical pressure field defined on Gamma_I into the STM basis coefficients.
-        
-        Parameters:
-        -----------
-        pressure_field : array-like, shape (n_internal_points,)
-            The complex pressure values matching the node ordering of `self.gammaI_points`.
-            
-        Returns:
-        --------
-        excitation : ndarray, shape (n_coeffs_I,)
-            The input excitation vector ready to be passed to `radiated_power()` or `synthesize_velocity()`.
-        error_percent : float
-            The relative L2 reconstruction error of the projection in percent.
-        """
-        if self.input_basis_vectors.size == 0:
-            raise ValueError("Basis vectors are not stored in this STM file. Cannot project pressure.")
-            
-        p = np.asarray(pressure_field, dtype=np.complex128).ravel()
-        if p.shape[0] != self.input_basis_vectors.shape[0]:
-            raise ValueError(
-                f"Pressure field size ({p.shape[0]}) does not match the internal "
-                f"mesh point count ({self.input_basis_vectors.shape[0]})."
-            )
-            
-        # Least squares projection onto the basis: [Basis] * c = p
-        coeffs, _, _, _ = np.linalg.lstsq(self.input_basis_vectors, p, rcond=None)
-        
-        # Calculate the reconstructed pressure to find the true relative error
-        p_recon = self.input_basis_vectors @ coeffs
-        
-        # Calculate error in percent (handle perfectly zero pressure fields safely)
-        p_norm = np.linalg.norm(p)
-        if p_norm == 0:
-            error_percent = 0.0
-        else:
-            error_percent = (np.linalg.norm(p_recon - p) / p_norm) * 100.0
-            
-        return coeffs, error_percent
-
-    def _as_excitation(self, excitation):
-        e = np.asarray(excitation, dtype=np.complex128).ravel()
-        if e.shape[0] != self.n_coeffs_I:
-            raise ValueError(f"excitation must have length n_coeffs_I={self.n_coeffs_I}, got {e.shape[0]}")
-        return e
-
     # -------------------------------------------------------------- synthesis
     def synthesize_coeffs(self, excitation):
-        """Output surface-velocity SH coefficients (1D layout), shape (n_coeffs_O, n_freq)."""
-        e = self._as_excitation(excitation)
-        return np.einsum("ijk,i->jk", self.STM, e)
+        """Output surface-velocity SH coefficients, shape (n_coeffs_O, n_freq)."""
+        exc = np.asarray(excitation, dtype=np.complex128)
+        
+        # Broadcast 1D excitations automatically for backward compatibility
+        if exc.ndim == 1:
+            if exc.shape[0] != self.n_coeffs_I:
+                raise ValueError(f"1D excitation length must be {self.n_coeffs_I}, got {exc.shape[0]}")
+            exc = np.tile(exc[:, np.newaxis], (1, self.n_frequencies))
+        elif exc.ndim == 2:
+            if exc.shape != (self.n_coeffs_I, self.n_frequencies):
+                raise ValueError(f"2D excitation shape must be ({self.n_coeffs_I}, {self.n_frequencies}), got {exc.shape}")
+        else:
+            raise ValueError("Excitation must be 1D or 2D.")
+
+        # Tensor Contraction:
+        # STM is (I, O, F)  -> 'ijk'
+        # exc is (I, F)     -> 'ik'
+        # Out is (O, F)     -> 'jk'
+        return np.einsum("ijk,ik->jk", self.STM, exc)
 
     def synthesize_coeffs_2d(self, excitation):
         """Output SH coefficients in pyshtools layout: (2, lmax_O+1, lmax_O+1, n_freq)."""
@@ -320,6 +280,7 @@ class STMSynthesizer:
         raise ValueError(f"Unknown part '{part}' (use real / imag / abs / phase)")
 
     # ------------------------------------------------------------------- figures
+    # (Plotly visualization methods remain structurally identical, passing exc downward)
     def figure_power_spectrum(self, excitation, rho: float = RHO_AIR, c: float = C_AIR, title=None):
         go = _import_go()
         p = self.radiated_power(excitation, rho=rho, c=c)
@@ -359,7 +320,6 @@ class STMSynthesizer:
         
         for i in range(err.shape[0]):
             label = self.input_labels[i]
-            # Try to group by 'l' if it's a spherical harmonic, else group by the label itself
             group = f"l{label.split('_')[1]}" if label.startswith("Y_") else "basis"
             fig.add_trace(go.Scatter(x=self.frequencies, y=err[i, :], mode="lines", name=label, legendgroup=group))
             
@@ -367,61 +327,55 @@ class STMSynthesizer:
             fig.add_annotation(text="Error data is all zero - regenerate the STM with the updated generator", xref="paper", yref="paper", x=0.5, y=1.08, showarrow=False)
         fig.update_layout(title=title or ("Relative fit error" if use_relative else "Absolute fit error"), xaxis_title="Frequency (Hz)", yaxis_title="Relative error" if use_relative else "Absolute error", yaxis_type="log", template="plotly_white")
         return fig
-
-
-if __name__ == "__main__":
-    import sys
-
-    path = sys.argv[1] if len(sys.argv) > 1 else r"C:/01_gitrepos/STM/STM_TP_MODAL.h5"
-    stm = STMSynthesizer(path)
-    print(stm)
     
-    # 2. Test Array Excitation (using explicit numpy array)
-    mock_coeffs = np.zeros(stm.n_coeffs_I, dtype=np.complex128)
-    mock_coeffs[1] = 100.0
-    
-# %%
-# 2. Test Array Excitation (using explicit numpy array)
-mock_coeffs = np.zeros(stm.n_coeffs_I, dtype=np.complex128)
-mock_coeffs[0] = 100.0
-exc = stm.excitation_from_array(mock_coeffs)
-fig = stm.figure_power_spectrum(exc)
-fig.show(renderer="browser")    
-# %%
-
-
-mock_pressure = np.full(stm.gammaI_points.shape[0], 100.0 + 100j)
-exc_from_p, error_percent = stm.excitation_from_pressure(mock_pressure)
-
-
-# %%
-
-n_points = stm.gammaI_points.shape[0]
+    def figure_pressure_reconstruction(self, p_target, p_recon, error_percent, freq_index=0, part="abs"):
+        """Generate a side-by-side 3D point cloud comparing original and reconstructed pressures."""
+        go = _import_go()
+        make_subplots = _import_make_subplots()
         
-# Generate random real and imaginary components between -100 and 100
-p_real = np.random.uniform(-100.0, 100.0, size=n_points)
-p_imag = np.random.uniform(-100.0, 100.0, size=n_points)
-
-# Combine them into a complex array
-random_pressure = p_real + 1j * p_imag
-
-# Project onto the basis and get the percentage error
-exc_from_p, error_pct = stm.excitation_from_pressure(random_pressure)
-
-
-
-# %%
-
-
-
-# exc_from_arr = stm.excitation_from_array(mock_coeffs)
-# power_arr = stm.radiated_power(exc_from_arr)
-# print(f"Power via Array Excitation (first 5 freqs, dB): {np.round(power_arr['total_db'][:5], 2)}")
-
-# # 3. Test Pressure Field Projection
-# if stm.gammaI_points.size > 0:
-#     # Create a mock pressure field on GammaI (e.g. static pressure of 100 Pa)
-#     mock_pressure = np.full(stm.gammaI_points.shape[0], 100.0 + 0j)
-#     exc_from_p, residuals = stm.excitation_from_pressure(mock_pressure)
-#     power_p = stm.radiated_power(exc_from_p)
-#     print(f"Power via Least Squares Projection (first 5 freqs, dB): {np.round(power_p['total_db'][:5], 2)}")
+        pts = self.gammaI_points
+        if pts.size == 0:
+            raise ValueError("No internal mesh geometry available for plotting.")
+            
+        # Handle 1D (static) vs 2D (frequency-dependent) arrays
+        p_t = p_target[:, freq_index] if p_target.ndim == 2 else p_target
+        p_r = p_recon[:, freq_index] if p_recon.ndim == 2 else p_recon
+        freq_label = f" @ {self.frequencies[freq_index]:.1f} Hz" if p_target.ndim == 2 else " (Static)"
+            
+        val_t = self._scalar_part(p_t, part)
+        val_r = self._scalar_part(p_r, part)
+        
+        # Lock the color scale so visually identical colors mean identical values
+        cmin = min(np.min(val_t), np.min(val_r))
+        cmax = max(np.max(val_t), np.max(val_r))
+        
+        fig = make_subplots(
+            rows=1, cols=2, 
+            specs=[[{'type': 'scene'}, {'type': 'scene'}]],
+            subplot_titles=(f"Original Mapped CFD{freq_label}", f"SVD Basis Reconstruction (Error: {error_percent:.1f}%)")
+        )
+        
+        # Original Pressure
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode='markers',
+            marker=dict(size=3, color=val_t, colorscale='Turbo', cmin=cmin, cmax=cmax, showscale=False),
+            name="Original"
+        ), row=1, col=1)
+        
+        # Reconstructed Pressure
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode='markers',
+            marker=dict(size=3, color=val_r, colorscale='Turbo', cmin=cmin, cmax=cmax, colorbar=dict(title=f"Pressure ({part})")),
+            name="Reconstructed"
+        ), row=1, col=2)
+        
+        fig.update_layout(
+            title=f"Internal Pressure Field Reconstruction Diagnostic ({part})",
+            scene=dict(aspectmode='data'),
+            scene2=dict(aspectmode='data'),
+            template="plotly_white",
+            margin=dict(l=0, r=0, b=0, t=50) # Tighter margins for better 3D viewing
+        )
+        return fig
