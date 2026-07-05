@@ -9,13 +9,7 @@ from ansys.mechanical.core import connect_to_mechanical
 import kdpf
 import pySDEM
 import pySTM
-from stm_core import (
-    check_genus_zero_and_map_if_needed,
-    enforce_zero_outside_radius,
-    export_named_fields,
-    setup_external_data,
-    solve_model,
-)
+
 
 model_folder = None  # Harmonic solver-files dir; auto-detected if None
 pressure_export_folder = None # Pressure files are placed in ANSYS system folder if None
@@ -26,7 +20,7 @@ STM_NAME = "STM_TP_MODAL" # Name of exported STM file
 
 nCores = 8 # N_cores to use when solving
 lmax_O = 60                      # output (GammaO) spherical-harmonic fitting degree
-workbench_server_port = 1045    # StartServer() to retrieve port
+workbench_server_port = 9285    # StartServer() to retrieve port
 workbench_server_ip = None 
 
 SHRINK_WRAP_STL_INTERNAL = None
@@ -36,7 +30,7 @@ SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 # --- In-vacuo modal-basis settings --------------------------------------------
 AREA_WEIGHTED_SVD = True   # orthonormalise in the surface-L2 (area-weighted) inner product
 SVD_REL_TOL = 1e-6         # drop basis vectors with singular value < SVD_REL_TOL * largest
-N_BASIS_MAX = 10         # optional hard cap on the number of retained basis vectors
+N_BASIS_MAX = 25         # optional hard cap on the number of retained basis vectors
 
 # Pressure File Import Settings
 systemName = "SYS 1"
@@ -107,7 +101,7 @@ modal_model = dpf.Model(modal_folder + r"\file.rst")
 
 # ---- GammaO (output/radiating surface): SDEM parameterisation for SH fitting ----
 gammaO_from_ansys = kdpf.get_skin_mesh_from_ns(EXTERNAL_NS, modal_model)
-gammaO, mapping_workflow_external = check_genus_zero_and_map_if_needed(
+gammaO, mapping_workflow_external = pySTM.check_genus_zero_and_map_if_needed(
     gammaO_from_ansys, "EXTERNAL", SHRINK_WRAP_STL_EXTERNAL, filter_radius=SHRINK_WRAP_MAP_FILTER_RADIUS
 )
 original_points_gammaO = gammaO.grid.points.copy()
@@ -174,7 +168,7 @@ print(f"In-vacuo modal basis (with constant shift): {n_modes} inputs -> {n_basis
       f"(area_weighted={AREA_WEIGHTED_SVD})")
 
 basis_names = [f"IVMB_{k}" for k in range(n_basis)]
-export_named_fields(basis_names, np.real(basis), np.imag(basis), gammaI_points, pressure_export_folder)
+pySTM.export_named_fields(basis_names, np.real(basis), np.imag(basis), gammaI_points, pressure_export_folder)
 allfiles = basis_names
 print(f"Exported {n_basis} basis pressure files to {pressure_export_folder}")
 
@@ -182,7 +176,7 @@ print(f"Exported {n_basis} basis pressure files to {pressure_export_folder}")
 # ============================================================================
 # Import basis to Workbench and solve one MSUP harmonic per basis vector.
 # ============================================================================
-setup_external_data(workbench, systemName, pressure_export_folder, allfiles,
+pySTM.setup_external_data(workbench, systemName, pressure_export_folder, allfiles,
                     StartImportAtLine=StartImportAtLine, DelimiterIs=DelimiterIs,
                     DelimiterStringIs=DelimiterStringIs, LengthUnit=LengthUnit,
                     PressureUnit=PressureUnit)
@@ -201,7 +195,7 @@ mechanical.wait_till_mechanical_is_ready()
 vn_list = []
 tfreq = None
 for fileid, filename in enumerate(allfiles, 1):
-    vn, gammaO_ret, tfreq = solve_model(
+    vn, gammaO_ret, tfreq = pySTM.solve_model(
         mechanical, filename, fileid, INTERNAL_NS, EXTERNAL_NS, model_folder,
         gammaO_from_ansys, normals_O, tfreq
     )
@@ -210,7 +204,7 @@ for fileid, filename in enumerate(allfiles, 1):
         vn = mapping_workflow_external.get_output('target', output_type="fields_container")
         
         #----------------------------ATTEMPT AT ENFORCING ZERO VN WHERE THERE IS NO MESH UNDER MAPPING
-        vn = enforce_zero_outside_radius(
+        vn = pySTM.enforce_zero_outside_radius(
             mapped_fc=vn, 
             source_mesh=gammaO_from_ansys, 
             target_mesh=gammaO, 
