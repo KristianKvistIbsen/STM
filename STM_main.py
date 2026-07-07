@@ -10,13 +10,15 @@ import kdpf
 import pySDEM
 import pySTM
 
-
+# =============================================================================
+# USER SETTINGS
+# =============================================================================
 model_folder = None  # Defaults to dp0/MECH of system if None
 pressure_export_folder = None  # Defaults to model_folder if None
 INTERNAL_NS = 'GAMMA_I'
 EXTERNAL_NS = 'GAMMA_E'
 
-STM_NAME = "STM_new_implementation_no_enforcement"
+STM_NAME = "STM_test"
 
 nCores = 8
 lmax_I = 1
@@ -24,11 +26,9 @@ lmax_O = 60
 workbench_server_port = 59361 # StartServer() to retrieve port
 workbench_server_ip = None
 
-SHRINK_WRAP_STL_INTERNAL = None#r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
-SHRINK_WRAP_STL_EXTERNAL = None#r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap.stl"
+SHRINK_WRAP_STL_INTERNAL = None
+SHRINK_WRAP_STL_EXTERNAL = None
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
-
-
 
 # Pressure File Import Settings
 systemName = "SYS"
@@ -39,6 +39,9 @@ StartImportAtLine = 2
 LengthUnit = "m"
 PressureUnit = "Pa"
 
+# =============================================================================
+# WORKBENCH & MECHANICAL CONNECTIONS
+# =============================================================================
 workbench = connect_workbench(
     port=workbench_server_port,
     host=workbench_server_ip if workbench_server_ip else None
@@ -70,44 +73,9 @@ if pressure_export_folder is None:
     pressure_export_folder = os.path.join(model_folder, "STM_pressures")
 os.makedirs(pressure_export_folder, exist_ok=True)
 
-
-def generate_spherical_harmonics(lmax, points, lat, lon):
-    """Generate spherical harmonics for given lmax and points."""
-    n_harmonics = (lmax + 1) ** 2 - 1  # -1 because \ell=0 monopole is handled separately
-    n_points = len(points)
-    sh_array = np.zeros((n_points, n_harmonics), dtype=np.complex128)
-    harm_idx = 0
-
-    for l in range(1, lmax + 1):
-        for m in range(-l, l + 1):
-            coeffs = np.zeros((2, l + 1, l + 1), dtype=np.complex128)
-            if m >= 0:
-                coeffs[0, l, m] = 1.0 + 0j
-            else:
-                coeffs[1, l, abs(m)] = 1.0 + 0j
-            sh_coeffs = pysh.SHCoeffs.from_array(coeffs)
-            sh_array[:, harm_idx] = pysh.expand.MakeGridPointC(sh_coeffs.coeffs, lat, lon)
-            harm_idx += 1
-    return sh_array, n_harmonics
-
-def export_spherical_harmonics(sh_array, points, export_folder, lmax):
-    """Export spherical harmonics to CSV files."""
-    allfiles = []
-    harm_idx = 0
-    for l in range(1, lmax + 1):
-        for m in range(-l, l + 1):
-            filename = f"Y_{l}_{m}.csv"
-            export_path = os.path.join(export_folder, filename)
-            sh_values = sh_array[:, harm_idx]
-            data = np.column_stack((points[:, 0], points[:, 1], points[:, 2], np.real(sh_values), np.imag(sh_values)))
-            header = ['x', 'y', 'z', 'real', 'imag']
-            np.savetxt(export_path, data, delimiter=',', header=','.join(header), comments='', fmt='%.16e')
-            allfiles.append(f"Y_{l}_{m}")
-            harm_idx += 1
-    return allfiles
-
-
-# The monopole (Y_0_0) is the first load case, setup manually in Ansys.
+# =============================================================================
+# MONOPOLE SETUP & SOLVE
+# =============================================================================
 monopole_solve_command = f"""
 model = ExtAPI.DataModel.Project.Model
 harmonics = [a for a in model.Analyses if "Harmonic" in a.AnalysisType.ToString()]
@@ -129,13 +97,15 @@ monopole_pressure.Suppressed = True
 analysis.ClearGeneratedData()
 """
 
-# Solve the monopole (Y_0_0)
 mechanical.run_python_script(monopole_solve_command)
 mechanical.wait_till_mechanical_is_ready()
 
-# Load and preprocess mesh
+# =============================================================================
+# MESH LOADING & PREPROCESSING (EXTERNAL & INTERNAL)
+# =============================================================================
 model = dpf.Model(model_folder + r"\file.rst")
 
+# External Mesh
 gammaO_from_ansys = kdpf.get_skin_mesh_from_ns(EXTERNAL_NS, model)
 gammaO, mapping_workflow_external = pySTM.check_genus_zero_and_map_if_needed(
     gammaO_from_ansys, "EXTERNAL", SHRINK_WRAP_STL_EXTERNAL
@@ -146,13 +116,14 @@ v_gammaO = grid_gammaO.points
 f_gammaO = grid_gammaO.cells_dict[list(grid_gammaO.cells_dict)[0]]
 population_gammaO = grid_gammaO["Area"]
 
-# Compute SDEM for external mesh
+# SDEM External
 S_gammaO = pySDEM.SphericalDensityEqualizingMap(v_gammaO, f_gammaO, population_gammaO)
 R_gammaO, _ = pySDEM.optimal_rotation(v_gammaO, S_gammaO)
 S_gammaO = S_gammaO @ R_gammaO
 x_gammaO, y_gammaO, z_gammaO = S_gammaO[:, 0], S_gammaO[:, 1], S_gammaO[:, 2]
 r_gammaO, lat_gammaO, lon_gammaO = pySDEM.cart_to_lat_lon(x_gammaO, y_gammaO, z_gammaO)
 
+# Internal Mesh
 gammaI_from_ansys = kdpf.get_skin_mesh_from_ns(INTERNAL_NS, model)
 gammaI, mapping_workflow_internal = pySTM.check_genus_zero_and_map_if_needed(
     gammaI_from_ansys, "INTERNAL", SHRINK_WRAP_STL_INTERNAL
@@ -163,17 +134,19 @@ v_gammaI = grid_gammaI.points
 f_gammaI = grid_gammaI.cells_dict[list(grid_gammaI.cells_dict)[0]]
 population_gammaI = grid_gammaI["Area"]
 
-# Compute SDEM for internal mesh
+# SDEM Internal
 S_gammaI = pySDEM.SphericalDensityEqualizingMap(v_gammaI, f_gammaI, population_gammaI)
 R_gammaI, _ = pySDEM.optimal_rotation(v_gammaI, S_gammaI)
 S_gammaI = S_gammaI @ R_gammaI
 x_gammaI, y_gammaI, z_gammaI = S_gammaI[:, 0], S_gammaI[:, 1], S_gammaI[:, 2]
 r_gammaI, lat_gammaI, lon_gammaI = pySDEM.cart_to_lat_lon(x_gammaI, y_gammaI, z_gammaI)
 
+# =============================================================================
+# EXTRACT MONOPOLE VELOCITY
+# =============================================================================
 normals_O = kdpf.get_normals(gammaO_from_ansys)
 tfreq = kdpf.get_tfreq(model)
 
-# Extract Monopole Result
 vn = kdpf.get_normal_velocities(model, gammaO_from_ansys, tfreq, normals_O)
 if mapping_workflow_external is not None:
     mapping_workflow_external.connect('source', vn)
@@ -188,9 +161,12 @@ if mapping_workflow_external is not None:
 vn_list = [vn]
 model.metadata.release_streams()
 
-# Generate and export spherical harmonics
-spherical_harmonics_array, n_harmonics = generate_spherical_harmonics(lmax_I, S_gammaI, lat_gammaI, lon_gammaI)
-allfiles = export_spherical_harmonics(spherical_harmonics_array, v_gammaI, pressure_export_folder, lmax_I)
+# =============================================================================
+# HARMONIC GENERATION & SOLVE LOOP
+# =============================================================================
+# Generate and export using pySTM module
+spherical_harmonics_array, n_harmonics = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat_gammaI, lon_gammaI)
+allfiles = pySTM.export_spherical_harmonics(spherical_harmonics_array, v_gammaI, pressure_export_folder, lmax_I)
 print(f"Spherical harmonics exported: {len(allfiles)} files to {pressure_export_folder}")
 
 mechanical.run_python_script(monopole_suppress_command)
@@ -202,7 +178,7 @@ pySTM.setup_external_data(workbench, systemName, pressure_export_folder, allfile
                     DelimiterStringIs=DelimiterStringIs, LengthUnit=LengthUnit,
                     PressureUnit=PressureUnit)
 
-# Set the solve core count once
+# Set core count once
 set_cores_command = f"""
 wbAnalysisName = "TARGET: HansenAutoImporter"
 for item in ExtAPI.DataModel.AnalysisList:
@@ -228,6 +204,9 @@ for fileid, filename in enumerate(allfiles, 1):
     vn_list.append(vn)
     print(f"Solved for {filename}")
 
+# =============================================================================
+# STM MATRIX ASSEMBLY (LEAST SQUARES)
+# =============================================================================
 print("Calculating STM")
 N_frequencies = len(tfreq.data)
 N_points = len(lat_gammaO)
@@ -261,6 +240,9 @@ rel_error = np.divide(abs_error, b_norms, out=np.zeros_like(abs_error), where=b_
 
 print("Done")
 
+# =============================================================================
+# METADATA & RESULTS PACKAGING
+# =============================================================================
 mesh_data = {
     'INTERNAL': {
         'InternalGrid': grid_gammaI,
