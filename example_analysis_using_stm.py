@@ -1,11 +1,11 @@
 import numpy as np
 from pySTM.stm_result_handler import STMSynthesizer
-from pySTM.excitation_handler import frequency_independent_excitation_from_csv
+from pySTM.excitation_handler import frequency_independent_excitation_from_csv, excitation_from_array
 
 # =============================================================================
 # Configuration
 # =============================================================================
-STM_FILEPATH = r"C:/01_gitrepos/STM/STM10.h5"
+STM_FILEPATH = r"C:/01_gitrepos/STM/STM_test.h5"
 CSV_FILEPATH = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv"
 
 # =============================================================================
@@ -25,17 +25,21 @@ print("\nMapping CSV pressure data and projecting to basis...")
 
 # New version: returns only (excitation, error_percent)
 # Set plot=True to automatically show the VTK pressure reconstruction diagnostic
-excitation, error_percent = frequency_independent_excitation_from_csv(
-    stm_synthesizer=STM,
-    csv_filepath=CSV_FILEPATH,
-    num_neighbors=3,
-    p=2,
-    plot=True,              # ← New: automatically shows VTK reconstruction plot
-    plot_part="abs"
-)
+# excitation, error_percent = frequency_independent_excitation_from_csv(
+#     stm_synthesizer=STM,
+#     csv_filepath=CSV_FILEPATH,
+#     num_neighbors=3,
+#     p=2,
+#     plot=True,              # ← New: automatically shows VTK reconstruction plot
+#     plot_part="abs"
+# )
 
-if isinstance(error_percent, float):
-    print(f"Bulk L2 Reconstruction Error: {error_percent:.4f} %")
+
+excitation = excitation_from_array(STM,np.array([1+0j,1+0j,0+2j,1-1j]),export_csv_path="testpressure.csv")
+
+
+# if isinstance(error_percent, float):
+#     print(f"Bulk L2 Reconstruction Error: {error_percent:.4f} %")
 
 # =============================================================================
 # Compute radiated sound power
@@ -43,6 +47,8 @@ if isinstance(error_percent, float):
 print("\nCalculating radiated sound power...")
 power_data = STM.radiated_power(excitation)
 total_power_db = power_data["total_db"]
+# %%
+
 
 valid_power = total_power_db[~np.isnan(total_power_db)]
 print(f"Max total radiated power: {valid_power.max():.2f} dB re 1 pW")

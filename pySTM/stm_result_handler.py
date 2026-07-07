@@ -202,7 +202,7 @@ class STMSynthesizer:
         p_abs_sqr = v_abs_sqr * np.abs(Z) ** 2
         k = 2.0 * np.pi * self.frequencies / c
         with np.errstate(divide="ignore", invalid="ignore"):
-            factor = np.where(k > 0, 1.0 / (2.0 * rho * c * k ** 2) / np.sqrt(4.0 * np.pi), 0.0)
+            factor = np.where(k > 0, 1.0 / (2.0 * rho * c * k ** 2) * 4.0 * np.pi, 0.0)
         per_order = p_abs_sqr * factor[np.newaxis, :]
         total = per_order.sum(axis=0)
         return {
@@ -211,6 +211,7 @@ class STMSynthesizer:
             "per_order": per_order,
             "frequencies": self.frequencies,
         }
+ 
 
     @staticmethod
     def _to_db(power, ref: float = POWER_REF):

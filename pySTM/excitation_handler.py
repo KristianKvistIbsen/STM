@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
+import os
 
-
-def excitation_from_array(stm_synthesizer, coeffs_array):
+def excitation_from_array(stm_synthesizer, coeffs_array, export_csv_path=None, export_freq_index=0):
     """
-    Build an excitation matrix from coefficients.
+    Build an excitation matrix from coefficients, with an option to synthesize 
+    and export the physical pressure field to a CSV file.
 
     Parameters
     ----------
@@ -14,6 +15,12 @@ def excitation_from_array(stm_synthesizer, coeffs_array):
     coeffs_array : array-like
         1D array of shape (n_coeffs_I,) → will be tiled across all frequencies,
         or 2D array of shape (n_coeffs_I, n_frequencies).
+    export_csv_path : str, optional
+        If provided, the synthesized pressure field on the internal mesh will 
+        be exported to this file path (e.g., 'excitation_field.csv').
+    export_freq_index : int, optional
+        The frequency index to use when exporting a 2D excitation array to CSV. 
+        Defaults to 0.
 
     Returns
     -------
@@ -24,18 +31,46 @@ def excitation_from_array(stm_synthesizer, coeffs_array):
     I = stm_synthesizer.n_coeffs_I
     F = stm_synthesizer.n_frequencies
 
+    # 1. Validate and shape the excitation array
     if e.ndim == 1:
         if e.shape[0] != I:
             raise ValueError(f"1D excitation must have length n_coeffs_I={I}, got {e.shape[0]}.")
-        return np.tile(e[:, np.newaxis], (1, F))
+        e_full = np.tile(e[:, np.newaxis], (1, F))
 
     elif e.ndim == 2:
         if e.shape != (I, F):
             raise ValueError(f"2D excitation must have shape ({I}, {F}), got {e.shape}.")
-        return e
+        e_full = e
 
     else:
         raise ValueError("Excitation array must be 1D or 2D.")
+
+    # 2. Export the physical pressure field to CSV if requested
+    if export_csv_path is not None:
+        if stm_synthesizer.input_basis_vectors.size == 0 or stm_synthesizer.gammaI_points.size == 0:
+            raise ValueError("Cannot export pressure: STM file is missing basis vectors or internal coordinates.")
+        
+        # Synthesize the pressure field for the requested frequency bin
+        # Shape: (n_points, n_coeffs_I) @ (n_coeffs_I,) -> (n_points,)
+        p_recon = stm_synthesizer.input_basis_vectors @ e_full[:, export_freq_index]
+        
+        coords = stm_synthesizer.gammaI_points
+        data = np.column_stack((
+            coords[:, 0], 
+            coords[:, 1], 
+            coords[:, 2], 
+            np.real(p_recon), 
+            np.imag(p_recon)
+        ))
+        
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(export_csv_path)), exist_ok=True)
+        
+        header = "x,y,z,real,imag"
+        np.savetxt(export_csv_path, data, delimiter=',', header=header, comments='', fmt='%.16e')
+        print(f"Exported synthesized pressure field to: {export_csv_path}")
+
+    return e_full
 
 
 def excitation_from_pressure(stm_synthesizer, pressure_field,
