@@ -15,19 +15,19 @@ import pySTM
 # =============================================================================
 model_folder = None  # Defaults to dp0/MECH of system if None
 pressure_export_folder = None  # Defaults to model_folder if None
-INTERNAL_NS = 'GAMMA_I'
-EXTERNAL_NS = 'GAMMA_E'
+INTERNAL_NS = 'GI'
+EXTERNAL_NS = 'GE'
 
-STM_NAME = "sphere_ell1"
+STM_NAME = "TP_ell1"
 
 nCores = 8
 lmax_I = 1
 lmax_O = 60
-workbench_server_port = 4196 # StartServer() to retrieve port
+workbench_server_port = 53525 # StartServer() to retrieve port
 workbench_server_ip = None
 
-SHRINK_WRAP_STL_INTERNAL = None# r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
-SHRINK_WRAP_STL_EXTERNAL = None#r"N:\PhD\GTM\CAD\NEBULA_DF_24_STL_5.stl"
+SHRINK_WRAP_STL_INTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
+SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap.stl"
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 
 # Pressure File Import Settings

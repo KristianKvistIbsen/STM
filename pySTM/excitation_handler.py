@@ -3,6 +3,170 @@ import pandas as pd
 from scipy.spatial import cKDTree
 import os
 
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+import pySTM
+import pySDEM
+
+def evaluate_basis_truncation_error(stl_filepath: str, csv_filepath: str, 
+                                    lmax_I: int = 10, num_neighbors: int = 3, p: float = 2.0,
+                                    plot_vtk: bool = True, vtk_part: str = "abs"):
+    print(f"Loading STL and converting to DPF mesh: {stl_filepath}")
+    dpf_mesh, _ = pySTM.stl_to_dpf_mesh(stl_filepath)
+    
+    # Check topology and map to sphere if necessary
+    gammaI, _ = pySTM.check_genus_zero_and_map_if_needed(dpf_mesh, "INTERNAL_EVAL")
+    
+    grid_gammaI = gammaI.grid.clean(remove_unused_points=True).compute_cell_sizes(length=False, area=True, volume=False)
+    v_gammaI = grid_gammaI.points
+    f_gammaI = grid_gammaI.cells_dict[list(grid_gammaI.cells_dict)[0]]
+    population_gammaI = grid_gammaI["Area"]
+    
+    print("Computing Spherical Density Equalizing Map (SDEM)...")
+    S_gammaI = pySDEM.SphericalDensityEqualizingMap(v_gammaI, f_gammaI, population_gammaI)
+    R_gammaI, _ = pySDEM.optimal_rotation(v_gammaI, S_gammaI)
+    S_gammaI = S_gammaI @ R_gammaI
+    x, y, z = S_gammaI[:, 0], S_gammaI[:, 1], S_gammaI[:, 2]
+    r, lat, lon = pySDEM.cart_to_lat_lon(x, y, z)
+    
+    print(f"Generating full spherical harmonic basis up to l = {lmax_I}...")
+    sh_array, _ = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat, lon)
+    monopole = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
+    full_basis = np.hstack((monopole, sh_array))
+    
+    print(f"Loading pressure field and mapping to mesh via IDW: {csv_filepath}")
+    df = pd.read_csv(csv_filepath, header=None, skiprows=1)
+    csv_coords = df.iloc[:, 1:4].values
+    csv_pressures = np.asarray(df.iloc[:, 4].values, dtype=np.complex128)
+    
+    tree = cKDTree(csv_coords)
+    distances, indices = tree.query(v_gammaI, k=num_neighbors)
+    mapped_pressures = np.zeros(v_gammaI.shape[0], dtype=np.complex128)
+    
+    for i in range(v_gammaI.shape[0]):
+        dist = distances[i]
+        idx = indices[i]
+        if dist[0] < 1e-12:
+            mapped_pressures[i] = csv_pressures[idx[0]]
+        else:
+            weights = 1.0 / (dist ** p)
+            mapped_pressures[i] = np.sum(weights * csv_pressures[idx]) / np.sum(weights)
+            
+    p_norm = np.linalg.norm(mapped_pressures)
+    if p_norm == 0:
+        raise ValueError("Mapped pressure field is entirely zero. Cannot compute relative error.")
+
+    degrees = np.arange(lmax_I + 1)
+    errors = np.zeros(lmax_I + 1)
+    
+    # We will store the final reconstruction to plot it later
+    final_p_recon = None 
+    
+    print("Decomposing pressure field iteratively...")
+    for current_l in degrees:
+        n_coeffs = (current_l + 1)**2
+        basis_subset = full_basis[:, :n_coeffs]
+        
+        # Least squares projection
+        coeffs, _, _, _ = np.linalg.lstsq(basis_subset, mapped_pressures, rcond=None)
+        
+        # Reconstruct
+        p_recon = basis_subset @ coeffs
+        
+        # Save the final reconstruction
+        if current_l == lmax_I:
+            final_p_recon = p_recon
+            
+        # Relative L2 error in percent
+        errors[current_l] = (np.linalg.norm(p_recon - mapped_pressures) / p_norm) * 100.0
+        print(f"  -> l={current_l} | Coefficients: {n_coeffs} | Error: {errors[current_l]:.2f}%")
+
+    # =========================================================================
+    # 1. MATPLOTLIB: CONVERGENCE GRAPH
+    # =========================================================================
+    plt.style.use('seaborn-v0_8-whitegrid')
+    mpl.rcParams['font.family'] = 'Times New Roman'
+    mpl.rcParams['font.size'] = 16
+    mpl.rcParams['axes.linewidth'] = 1.2
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(degrees, errors, marker='o', color='#bf0000', linewidth=2.5, markersize=8, label='Reconstruction Error')
+    
+    ax.set_xlabel(r'Maximum Spherical Harmonic Degree ($l_{max}$)', fontsize=18)
+    ax.set_ylabel('Relative Error (%)', fontsize=18)
+    ax.set_title('Internal Pressure Field Convergence', fontsize=20, pad=15)
+    
+    ax.set_xticks(degrees)
+    ax.set_ylim(max(-5, -0.05 * np.max(errors)), np.max(errors) * 1.1)
+    ax.grid(True, linestyle='-', alpha=0.7)
+    
+    ax.axhline(y=5.0, color='#005B96', linestyle='--', linewidth=2, alpha=0.8, label='5% Error Threshold')
+    ax.legend(loc='upper right', frameon=True, edgecolor='black', fontsize=14)
+    
+    plt.tight_layout()
+    plt.show(block=False)  # Non-blocking so PyVista can spawn immediately after
+    
+    # =========================================================================
+    # 2. PYVISTA: 3D FIELD COMPARISON
+    # =========================================================================
+    if plot_vtk and final_p_recon is not None:
+        import pyvista as pv
+        
+        # Extract desired scalar part
+        if vtk_part.lower() == "real":
+            val_orig = np.real(mapped_pressures)
+            val_recon = np.real(final_p_recon)
+        elif vtk_part.lower() == "imag":
+            val_orig = np.imag(mapped_pressures)
+            val_recon = np.imag(final_p_recon)
+        else:  # Default to absolute magnitude
+            val_orig = np.abs(mapped_pressures)
+            val_recon = np.abs(final_p_recon)
+            
+        val_diff = np.abs(mapped_pressures - final_p_recon)
+
+        # Construct physical PyVista Mesh with faces
+        mesh = pv.PolyData(v_gammaI)
+        mesh.faces = np.hstack([np.full((len(f_gammaI), 1), 3), f_gammaI]).astype(np.int32)
+        
+        cmin = min(np.min(val_orig), np.min(val_recon))
+        cmax = max(np.max(val_orig), np.max(val_recon))
+        
+        # Create a 1x3 synchronized subplot
+        plotter = pv.Plotter(shape=(1, 3), window_size=[1600, 500])
+        
+        # Plot 1: Original CFD Pressure
+        plotter.subplot(0, 0)
+        mesh_orig = mesh.copy()
+        mesh_orig.point_data["Pressure"] = val_orig
+        plotter.add_mesh(mesh_orig, scalars="Pressure", cmap="turbo", clim=[cmin, cmax], show_edges=False,
+                         scalar_bar_args={"title": f"Original ({vtk_part})"})
+        plotter.add_text("Original IDW-Mapped Pressure", position="upper_edge", font_size=11)
+        
+        # Plot 2: Reconstructed Pressure
+        plotter.subplot(0, 1)
+        mesh_recon = mesh.copy()
+        mesh_recon.point_data["Pressure"] = val_recon
+        plotter.add_mesh(mesh_recon, scalars="Pressure", cmap="turbo", clim=[cmin, cmax], show_edges=False,
+                         scalar_bar_args={"title": f"Recon ({vtk_part})"})
+        plotter.add_text(f"Reconstruction (lmax={lmax_I})", position="upper_edge", font_size=11)
+        
+        # Plot 3: Absolute Difference / Error
+        plotter.subplot(0, 2)
+        mesh_diff = mesh.copy()
+        mesh_diff.point_data["Error"] = val_diff
+        plotter.add_mesh(mesh_diff, scalars="Error", cmap="Reds", show_edges=False,
+                         scalar_bar_args={"title": "Absolute Diff"})
+        plotter.add_text(f"Error Magnitude ({errors[-1]:.2f}%)", position="upper_edge", font_size=11)
+        
+        # Link cameras so rotating one rotates all three identically
+        plotter.link_views()
+        plotter.show()
+
+    return degrees, errors
+
+
 def excitation_from_array(stm_synthesizer, coeffs_array, export_csv_path=None, export_freq_index=0):
     """
     Build an excitation matrix from coefficients, with an option to synthesize 
