@@ -18,16 +18,16 @@ pressure_export_folder = None  # Defaults to model_folder if None
 INTERNAL_NS = 'GAMMA_I'
 EXTERNAL_NS = 'GAMMA_E'
 
-STM_NAME = "STM_test"
+STM_NAME = "sphere_ell1"
 
 nCores = 8
 lmax_I = 1
 lmax_O = 60
-workbench_server_port = 59361 # StartServer() to retrieve port
+workbench_server_port = 4196 # StartServer() to retrieve port
 workbench_server_ip = None
 
-SHRINK_WRAP_STL_INTERNAL = None
-SHRINK_WRAP_STL_EXTERNAL = None
+SHRINK_WRAP_STL_INTERNAL = None# r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
+SHRINK_WRAP_STL_EXTERNAL = None#r"N:\PhD\GTM\CAD\NEBULA_DF_24_STL_5.stl"
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 
 # Pressure File Import Settings

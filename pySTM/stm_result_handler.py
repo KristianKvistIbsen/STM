@@ -373,3 +373,115 @@ class STMSynthesizer:
         # 3. Absolute Difference
         p3 = _make_plotter(val_diff, f"Abs Diff (Error: {error_percent:.1f}%)", "Reds")
         p3.show()
+        
+        
+    @staticmethod
+    def _surface_impedance_Z(l, ka, rho, c):
+        """True modal specific acoustic impedance on the surface of a sphere."""
+        # Spherical Bessel (jn) and Neumann (yn) functions
+        jn = spherical_jn(l, ka)
+        yn = spherical_yn(l, ka)
+        h1 = jn + 1j * yn  # Spherical Hankel function of the first kind
+        
+        # Derivatives
+        d_jn = spherical_jn(l, ka, derivative=True)
+        d_yn = spherical_yn(l, ka, derivative=True)
+        dh1 = d_jn + 1j * d_yn
+        
+        # True specific acoustic impedance: Z = i * rho * c * (h1 / dh1)
+        return 1j * rho * c * h1 / dh1
+
+    def _surface_impedance_table(self, rho, c):
+        """Precompute true surface impedance for all l and frequencies."""
+        key = (rho, c, "surface")
+        if getattr(self, '_Z_surf_cache_key', None) == key and getattr(self, '_Z_surf_table', None) is not None:
+            return self._Z_surf_table
+            
+        if self.equivalent_radius is None:
+            raise ValueError("No external mesh areas available; cannot form the impedance table.")
+            
+        L = self.lmax_O
+        Z = np.zeros((L + 1, self.n_frequencies), dtype=np.complex128)
+        a = self.equivalent_radius
+        
+        for fi, freq in enumerate(self.frequencies):
+            if freq <= 0:
+                continue
+            ka = (2.0 * np.pi * freq / c) * a
+            for l in range(L + 1):
+                Z[l, fi] = self._surface_impedance_Z(l, ka, rho, c)
+                
+        self._Z_surf_table = Z
+        self._Z_surf_cache_key = key
+        return Z
+    
+    
+# =============================================================================
+#     Non-negative intensity calculation
+# =============================================================================
+    def synthesize_intensity(self, excitation, rho: float = RHO_AIR, c: float = C_AIR, 
+                             method: str = "NNI", plot: bool = False, 
+                             plot_freq_index: int = 0, cmap: str = "inferno", title: str = None):
+        # 1. Get Velocity Coefficients
+        c_eta = self.synthesize_coeffs(excitation)  # Shape: (n_coeffs_O, n_frequencies)
+        
+        # 2. Extract TRUE Surface Impedance (other impedance function is missing the hankel function to compensate for the definition in FourierAcoustics book)
+        Z_table = self._surface_impedance_table(rho, c)
+        Z_eta = Z_table[self._out_l, :]             # Expand to shape (n_coeffs_O, n_frequencies)
+
+        method = method.upper()
+        
+        if method == "NNI":
+            # True modal radiation resistance at the surface
+            R_eta = np.maximum(np.real(Z_eta), 0.0)
+            
+            # Construct the beta parameter
+            beta_eta = c_eta * np.sqrt(R_eta)
+            beta_x = self.G @ beta_eta
+            
+            # Non-Negative Intensity (strictly positive, tracks symmetric structural radiation)
+            intensity_data = 0.5 * np.abs(beta_x)**2
+
+        elif method == "SSI":
+            # Compute true surface pressure coefficients (p_eta = c_eta * Z_eta)
+            p_eta = c_eta * Z_eta
+            
+            # Reconstruct spatial pressure and velocity fields
+            p_x = self.G @ p_eta
+            v_x = self.G @ c_eta
+            
+            # True active surface intensity
+            intensity_data = 0.5 * np.real(p_x * np.conj(v_x))
+
+        else:
+            raise ValueError("Method must be 'NNI' or 'SSI'")
+
+        # 3. Optional VTK Plotting
+        if plot:
+            import pyvista as pv
+
+            if self._external_points is None or self._external_faces is None:
+                print("Warning: No external mesh geometry available for 3D plotting. Skipping plot.")
+            else:
+                field = intensity_data[:, plot_freq_index]
+
+                # Construct the physical PyVista mesh
+                mesh = pv.PolyData(self._external_points)
+                if self._external_faces is not None:
+                    mesh.faces = np.hstack([
+                        np.full((len(self._external_faces), 1), 3), 
+                        self._external_faces
+                    ]).astype(np.int32)
+
+                # Apply scalar data
+                mesh.point_data[f"Intensity ({method})"] = field
+
+                plotter = pv.Plotter()
+                plotter.add_mesh(mesh, scalars=f"Intensity ({method})", cmap=cmap, show_edges=False,
+                                 scalar_bar_args={"title": f"Intensity [W/m²]"})
+                
+                plot_title = title or f"Surface {method} @ {self.frequencies[plot_freq_index]:.1f} Hz"
+                plotter.add_text(plot_title, position="upper_edge", font_size=12)
+                plotter.show()
+
+        return intensity_data
