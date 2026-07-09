@@ -18,12 +18,12 @@ pressure_export_folder = None  # Defaults to model_folder if None
 INTERNAL_NS = 'GI'
 EXTERNAL_NS = 'GE'
 
-STM_NAME = "TP_ell1"
+STM_NAME = "test"
 
 nCores = 8
 lmax_I = 1
 lmax_O = 60
-workbench_server_port = 53525 # StartServer() to retrieve port
+workbench_server_port = 33086 # StartServer() to retrieve port
 workbench_server_ip = None
 
 SHRINK_WRAP_STL_INTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
@@ -31,7 +31,7 @@ SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap.stl"
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 
 # Pressure File Import Settings
-systemName = "SYS"
+systemName = "SYS 1"
 DataExtension = "csv"
 DelimiterIs = "Comma"
 DelimiterStringIs = ","
