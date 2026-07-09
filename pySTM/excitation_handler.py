@@ -9,9 +9,33 @@ import matplotlib as mpl
 import pySTM
 import pySDEM
 
-def evaluate_basis_truncation_error(stl_filepath: str, csv_filepath: str, 
+def evaluate_basis_truncation_error(stl_filepath: str, target_csv_filepath: str, augmentation_csv_filepath: str = None,
                                     lmax_I: int = 10, num_neighbors: int = 3, p: float = 2.0,
-                                    plot_vtk: bool = True, vtk_part: str = "abs"):
+                                    plot_vtk: bool = True, vtk_part: str = "abs", use_svd: bool = False):
+    """
+    Map an internal STL to a sphere, generate spherical harmonics (or SVD basis) up to lmax_I, 
+    iteratively decompose a CSV pressure field to plot reconstruction error vs l,
+    and visually compare the original vs reconstructed fields using PyVista.
+    
+    Parameters
+    ----------
+    stl_filepath : str
+        Path to the STL file representing the internal surface (Gamma_I).
+    target_csv_filepath : str
+        Path to the CSV file containing the target pressure field to reconstruct. 
+    augmentation_csv_filepath : str, optional
+        Path to the CSV file used to augment the basis via SVD. Required if use_svd is True.
+    lmax_I : int
+        The maximum equivalent spherical harmonic degree to test.
+    num_neighbors, p : int, float
+        Parameters for the Inverse Distance Weighting (IDW) CSV interpolation.
+    plot_vtk : bool
+        If True, spawns a 3D interactive side-by-side PyVista plot at the end.
+    vtk_part : str
+        Which part of the complex pressure to visualize ("abs", "real", "imag").
+    use_svd : bool
+        If True, automatically generates and uses the custom SVD augmented basis instead of standard SH.
+    """
     print(f"Loading STL and converting to DPF mesh: {stl_filepath}")
     dpf_mesh, _ = pySTM.stl_to_dpf_mesh(stl_filepath)
     
@@ -30,13 +54,19 @@ def evaluate_basis_truncation_error(stl_filepath: str, csv_filepath: str,
     x, y, z = S_gammaI[:, 0], S_gammaI[:, 1], S_gammaI[:, 2]
     r, lat, lon = pySDEM.cart_to_lat_lon(x, y, z)
     
-    print(f"Generating full spherical harmonic basis up to l = {lmax_I}...")
-    sh_array, _ = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat, lon)
-    monopole = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
-    full_basis = np.hstack((monopole, sh_array))
+    if use_svd:
+        if augmentation_csv_filepath is None:
+            raise ValueError("augmentation_csv_filepath must be provided if use_svd is True.")
+        print(f"Generating SVD augmented basis up to l = {lmax_I}...")
+        full_basis, _ = pySTM.generate_svd_augmented_basis(lmax_I, S_gammaI, lat, lon, v_gammaI, augmentation_csv_filepath, num_neighbors, p)
+    else:
+        print(f"Generating full spherical harmonic basis up to l = {lmax_I}...")
+        sh_array, _ = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat, lon)
+        monopole = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
+        full_basis = np.hstack((monopole, sh_array))
     
-    print(f"Loading pressure field and mapping to mesh via IDW: {csv_filepath}")
-    df = pd.read_csv(csv_filepath, header=None, skiprows=1)
+    print(f"Loading target pressure field and mapping to mesh via IDW: {target_csv_filepath}")
+    df = pd.read_csv(target_csv_filepath, header=None, skiprows=1)
     csv_coords = df.iloc[:, 1:4].values
     csv_pressures = np.asarray(df.iloc[:, 4].values, dtype=np.complex128)
     
@@ -55,7 +85,7 @@ def evaluate_basis_truncation_error(stl_filepath: str, csv_filepath: str,
             
     p_norm = np.linalg.norm(mapped_pressures)
     if p_norm == 0:
-        raise ValueError("Mapped pressure field is entirely zero. Cannot compute relative error.")
+        raise ValueError("Mapped target pressure field is entirely zero. Cannot compute relative error.")
 
     degrees = np.arange(lmax_I + 1)
     errors = np.zeros(lmax_I + 1)
@@ -85,6 +115,8 @@ def evaluate_basis_truncation_error(stl_filepath: str, csv_filepath: str,
     # =========================================================================
     # 1. MATPLOTLIB: CONVERGENCE GRAPH
     # =========================================================================
+    basis_name_title = "SVD Augmented Basis" if use_svd else "Spherical Harmonics"
+    
     plt.style.use('seaborn-v0_8-whitegrid')
     mpl.rcParams['font.family'] = 'Times New Roman'
     mpl.rcParams['font.size'] = 16
@@ -93,9 +125,9 @@ def evaluate_basis_truncation_error(stl_filepath: str, csv_filepath: str,
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(degrees, errors, marker='o', color='#bf0000', linewidth=2.5, markersize=8, label='Reconstruction Error')
     
-    ax.set_xlabel(r'Maximum Spherical Harmonic Degree ($l_{max}$)', fontsize=18)
+    ax.set_xlabel(r'Equivalent Maximum Degree ($l_{max}$)', fontsize=18)
     ax.set_ylabel('Relative Error (%)', fontsize=18)
-    ax.set_title('Internal Pressure Field Convergence', fontsize=20, pad=15)
+    ax.set_title(f'Internal Pressure Field Convergence ({basis_name_title})', fontsize=20, pad=15)
     
     ax.set_xticks(degrees)
     ax.set_ylim(max(-5, -0.05 * np.max(errors)), np.max(errors) * 1.1)

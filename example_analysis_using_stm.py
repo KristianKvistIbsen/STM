@@ -4,9 +4,11 @@ from pySTM.excitation_handler import frequency_independent_excitation_from_csv, 
 
 
 
-# stl = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
-# pressure_csv = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv"
-# evaluate_basis_truncation_error(stl_filepath=stl,csv_filepath=pressure_csv,lmax_I=6,)
+stl = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
+pressure_csv = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv"
+evaluate_basis_truncation_error()
+# %%
+
 
 STM_FILEPATH = r"C:/01_gitrepos/STM/test.h5"
 

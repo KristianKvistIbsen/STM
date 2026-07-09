@@ -136,6 +136,52 @@ def generate_spherical_harmonics(lmax, points, lat, lon):
             harm_idx += 1
     return sh_array, n_harmonics
 
+def generate_svd_augmented_basis(lmax_I, S_gammaI, lat_gammaI, lon_gammaI, v_gammaI, csv_filepath, num_neighbors=3, p=2.0):
+    """
+    Generate SH basis up to lmax_I, append a target pressure CSV mapped via IDW, 
+    and orthogonalize via SVD to return a truncated custom basis.
+    """
+    import numpy as np
+    import pandas as pd
+    from scipy.spatial import cKDTree
+    
+    # 1. Generate standard SH basis (excluding monopole, which we add manually)
+    n_coeffs_I = (lmax_I + 1) ** 2
+    sh_array, _ = generate_spherical_harmonics(lmax_I, S_gammaI, lat_gammaI, lon_gammaI)
+    monopole = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
+    full_sh_basis = np.hstack((monopole, sh_array))
+    
+    # 2. Load and map pressure field via IDW
+    print(f"Loading pressure field for SVD augmentation: {csv_filepath}")
+    df = pd.read_csv(csv_filepath, header=None, skiprows=1)
+    csv_coords = df.iloc[:, 1:4].values
+    csv_pressures = np.asarray(df.iloc[:, 4].values, dtype=np.complex128)
+    
+    tree = cKDTree(csv_coords)
+    distances, indices = tree.query(v_gammaI, k=num_neighbors)
+    mapped_pressures = np.zeros(v_gammaI.shape[0], dtype=np.complex128)
+    
+    for i in range(v_gammaI.shape[0]):
+        dist = distances[i]
+        idx = indices[i]
+        if dist[0] < 1e-12:
+            mapped_pressures[i] = csv_pressures[idx[0]]
+        else:
+            weights = 1.0 / (dist ** p)
+            mapped_pressures[i] = np.sum(weights * csv_pressures[idx]) / np.sum(weights)
+            
+    # 3. Augment basis and perform SVD
+    print("Augmenting basis and performing SVD...")
+    augmented_basis = np.hstack((full_sh_basis, mapped_pressures.reshape(-1, 1)))
+    
+    # U contains the orthonormal vectors spanning the augmented column space
+    U, S_svd, Vh = np.linalg.svd(augmented_basis, full_matrices=False)
+    
+    # 4. Truncate to the exact size of the original SH basis
+    custom_basis = U[:, :n_coeffs_I]
+    
+    print(f"Custom SVD basis generated. Shape: {custom_basis.shape}")
+    return custom_basis, n_coeffs_I
 
 def export_spherical_harmonics(sh_array, points, export_folder, lmax):
     """Export spherical harmonics to CSV files."""
