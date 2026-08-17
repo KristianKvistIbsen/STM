@@ -19,12 +19,12 @@ pressure_export_folder = None  # Defaults to model_folder if None
 INTERNAL_NS = 'GI'
 EXTERNAL_NS = 'GE'
 
-STM_NAME = "test"
+STM_NAME = "test_augmented"
 
 nCores = 8
 lmax_I = 1
 lmax_O = 60
-workbench_server_port = 33086 # StartServer() to retrieve port
+workbench_server_port = 63585 # StartServer() to retrieve port
 workbench_server_ip = None
 
 SHRINK_WRAP_STL_INTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
@@ -32,7 +32,7 @@ SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap.stl"
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
 
 # Toggle: Set to a CSV filepath to use SVD augmented basis, or None for pure Spherical Harmonics
-TARGET_PRESSURE_CSV = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv" 
+BASIS_AUGMENTATION_PRESSURE = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv" 
 
 # Pressure File Import Settings
 systemName = "SYS 1"
@@ -233,10 +233,10 @@ normals_O = kdpf.get_normals(gammaO_from_ansys)
 tfreq = None  
 vn_list = []
 
-if TARGET_PRESSURE_CSV:
+if BASIS_AUGMENTATION_PRESSURE:
     print("\nUsing Custom SVD Augmented Basis...")
     full_basis_array, n_coeffs_I = pySTM.generate_svd_augmented_basis(
-        lmax_I, S_gammaI, lat_gammaI, lon_gammaI, v_gammaI, TARGET_PRESSURE_CSV
+        lmax_I, S_gammaI, lat_gammaI, lon_gammaI, v_gammaI, BASIS_AUGMENTATION_PRESSURE
     )
     n_harmonics = n_coeffs_I
     basis_labels = [f"SVD_Basis_{i}" for i in range(n_coeffs_I)]
@@ -371,7 +371,7 @@ results_data = {
     'STM': STM,
     'G': G,
     'frequencies': tfreq.data,
-    'export_files': {'harmonic_files': allfiles, 'n_files_exported': len(allfiles), 'file_pattern': 'Y_l_m.csv' if not TARGET_PRESSURE_CSV else 'SVD_Basis_i.csv'},
+    'export_files': {'harmonic_files': allfiles, 'n_files_exported': len(allfiles), 'file_pattern': 'Y_l_m.csv' if not BASIS_AUGMENTATION_PRESSURE else 'SVD_Basis_i.csv'},
     'point_mappings': {'point_mapping': np.array(point_mapping_gammaO), 'n_original_points': len(original_points_gammaO),
                        'n_cleaned_points': len(v_gammaO)},
     'error_data': {
