@@ -14,34 +14,55 @@ import pySTM
 # =============================================================================
 # USER SETTINGS
 # =============================================================================
-model_folder = None  # Defaults to dp0/MECH of system if None
-pressure_export_folder = None  # Defaults to model_folder if None
-INTERNAL_NS = 'GI'
-EXTERNAL_NS = 'GE'
 
-STM_NAME = "test_augmented"
-
-nCores = 8
-lmax_I = 1
-lmax_O = 60
+# Workbench server port (and IPv4, if not on localhost 127.0.0.1)
+# ---------------------------------------------------------------------- #
+# In Workbench:                                                          #
+#   File -> Scripting -> Open command window                             #
+#       In command window: StartServer()                                 #
+#           Returned number is inserted below as workbench_server_port   #
+# ---------------------------------------------------------------------- #
 workbench_server_port = 63585 # StartServer() to retrieve port
 workbench_server_ip = None
 
+# ANSYS settings
+model_folder            = None  # Defaults to dp0/MECH of system if None
+pressure_export_folder  = None  # Defaults to model_folder if None
+nCores                  = 8
+# Pressure File Import Settings
+systemName          = "SYS 1" #Name of the system where data is imported
+DataExtension       = "csv" # CSV format
+DelimiterIs         = "Comma" # Comma seperated
+DelimiterStringIs   = "," # Comma seperated
+StartImportAtLine   = 2 # Assumes there is a header at line 1
+LengthUnit          = "m" # Must be m! Implement unit conversion if not m
+PressureUnit        = "Pa" # Must be Pa! Implement unit conversion if not Pa
+
+# STM settings
+STM_NAME    = "test_augmented" # Name of outputted STM file
+INTERNAL_NS = 'GI' # Named selection of inner (pressure loaded) surface
+EXTERNAL_NS = 'GE' # Named selection of outer (sound radiating) surface
+lmax_O      = 60   # Highest degree of SH used for decomposing outer surface
+
+# .stl for representing inner and outer surfaces, if they are not water tight
 SHRINK_WRAP_STL_INTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
 SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap.stl"
-SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005
+SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005 #Mapping radius between surface and stl
 
-# Toggle: Set to a CSV filepath to use SVD augmented basis, or None for pure Spherical Harmonics
-BASIS_AUGMENTATION_PRESSURE = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv" 
 
-# Pressure File Import Settings
-systemName = "SYS 1"
-DataExtension = "csv"
-DelimiterIs = "Comma"
-DelimiterStringIs = ","
-StartImportAtLine = 2
-LengthUnit = "m"
-PressureUnit = "Pa"
+
+# Sphesrical harmonic load definition
+# (Uses SH functions as pressure basis on internal surface, classical STM)
+SH_basis = True # Toggles this excitation type
+lmax_I   = 1    # Highest degre of SH used for excitation
+
+
+# SVD Basis
+# (Takes in .csv file of pressure field on inner surface and adds it to the
+#  SH basis. Then performs SVD to retrieve an augmented SH basis)
+SVD_basis        = True
+lmax_I           = 1
+pressure_for_svd = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv" 
 
 # =============================================================================
 # WORKBENCH & MECHANICAL CONNECTIONS
@@ -233,23 +254,28 @@ normals_O = kdpf.get_normals(gammaO_from_ansys)
 tfreq = None  
 vn_list = []
 
-if BASIS_AUGMENTATION_PRESSURE:
-    print("\nUsing Custom SVD Augmented Basis...")
-    full_basis_array, n_coeffs_I = pySTM.generate_svd_augmented_basis(
-        lmax_I, S_gammaI, lat_gammaI, lon_gammaI, v_gammaI, BASIS_AUGMENTATION_PRESSURE
-    )
-    n_harmonics = n_coeffs_I
-    basis_labels = [f"SVD_Basis_{i}" for i in range(n_coeffs_I)]
-    basis_type = 'svd_augmented'
-else:
-    print("\nUsing Standard Spherical Harmonics Basis (Including Monopole)...")
-    sh_array, n_harmonics = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat_gammaI, lon_gammaI)
-    n_coeffs_I = (lmax_I + 1) ** 2
-    monopole_array = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
-    full_basis_array = np.hstack((monopole_array, sh_array))
+if (SVD_basis+SH_basis) == 1:
+    if SVD_basis:
+        print("\nUsing Custom SVD Augmented Basis...")
+        full_basis_array, n_coeffs_I = pySTM.generate_svd_augmented_basis(
+            lmax_I, S_gammaI, lat_gammaI, lon_gammaI, v_gammaI, pressure_for_svd
+        )
+        n_harmonics = n_coeffs_I
+        basis_labels = [f"SVD_Basis_{i}" for i in range(n_coeffs_I)]
+        basis_type = 'svd_augmented'
+    elif SH_basis:
+        print("\nUsing Standard Spherical Harmonics Basis (Including Monopole)...")
+        sh_array, n_harmonics = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat_gammaI, lon_gammaI)
+        n_coeffs_I = (lmax_I + 1) ** 2
+        monopole_array = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
+        full_basis_array = np.hstack((monopole_array, sh_array))
+        
+        basis_labels = [f"Y_{l}_{m}" for l in range(lmax_I + 1) for m in range(-l, l + 1)]
+        basis_type = 'spherical_harmonics'
+    else:
+        print("*** ERROR: Basis not defined ***")
     
-    basis_labels = [f"Y_{l}_{m}" for l in range(lmax_I + 1) for m in range(-l, l + 1)]
-    basis_type = 'spherical_harmonics'
+        
 
 allfiles = pySTM.export_named_fields(
     basis_labels, np.real(full_basis_array), np.imag(full_basis_array), 
