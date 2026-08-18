@@ -22,7 +22,7 @@ import pySTM
 #       In command window: StartServer()                                 #
 #           Returned number is inserted below as workbench_server_port   #
 # ---------------------------------------------------------------------- #
-workbench_server_port = 63585 # StartServer() to retrieve port
+workbench_server_port = 37021 # StartServer() to retrieve port
 workbench_server_ip = None
 
 # ANSYS settings
@@ -30,7 +30,7 @@ model_folder            = None  # Defaults to dp0/MECH of system if None
 pressure_export_folder  = None  # Defaults to model_folder if None
 nCores                  = 8
 # Pressure File Import Settings
-systemName          = "SYS 1" #Name of the system where data is imported
+systemName          = "SYS" #Name of the system where data is imported
 DataExtension       = "csv" # CSV format
 DelimiterIs         = "Comma" # Comma seperated
 DelimiterStringIs   = "," # Comma seperated
@@ -39,30 +39,44 @@ LengthUnit          = "m" # Must be m! Implement unit conversion if not m
 PressureUnit        = "Pa" # Must be Pa! Implement unit conversion if not Pa
 
 # STM settings
-STM_NAME    = "test_augmented" # Name of outputted STM file
+STM_NAME    = "motor" # Name of outputted STM file
 INTERNAL_NS = 'GI' # Named selection of inner (pressure loaded) surface
 EXTERNAL_NS = 'GE' # Named selection of outer (sound radiating) surface
-lmax_O      = 60   # Highest degree of SH used for decomposing outer surface
+lmax_O      = 80   # Highest degree of SH used for decomposing outer surface
 
 # .stl for representing inner and outer surfaces, if they are not water tight
-SHRINK_WRAP_STL_INTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap_inner.stl"
-SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\STM\TP\TP_pumphousing_shrinkwrap.stl"
+SHRINK_WRAP_STL_INTERNAL = None
+SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\motor_noise\shrinkwrap.stl"
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005 #Mapping radius between surface and stl
-
-
 
 # Sphesrical harmonic load definition
 # (Uses SH functions as pressure basis on internal surface, classical STM)
-SH_basis = True # Toggles this excitation type
+SH_basis = False # Toggles this excitation type
 lmax_I   = 1    # Highest degre of SH used for excitation
-
 
 # SVD Basis
 # (Takes in .csv file of pressure field on inner surface and adds it to the
 #  SH basis. Then performs SVD to retrieve an augmented SH basis)
-SVD_basis        = True
+SVD_basis        = False
 lmax_I           = 1
 pressure_for_svd = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv" 
+
+# Custom basis
+# (Entirely custom basis. Must be made explicitly on mesh of analyzed geometry.
+#  Find example code for producing such a basis in pySTM_utils)
+CUSTOM_basis = True
+custom_basis_csv = r"C:/01_gitrepos/STM/stator_harmonic_loads.csv"
+
+# =============================================================================
+# CONFIG VALIDATION
+# =============================================================================
+if not (SH_basis+SVD_basis+CUSTOM_basis) == 1:
+    raise Exception("Please only define one excitation type")
+elif not PressureUnit=="Pa":
+    raise Exception("Pressure unit must be Pa (Son, In my house we use MKS)")
+elif not LengthUnit=="m":
+    raise Exception("Length unit must be m (Son, In my house we use MKS)")    
+    
 
 # =============================================================================
 # WORKBENCH & MECHANICAL CONNECTIONS
@@ -107,9 +121,20 @@ import json
 mesh_data = ExtAPI.DataModel.MeshDataByName("Global")
 
 # Extract Nodes
+mesh_unit = mesh_data.Unit.lower()
+scale = 1.0
+
+# Determine conversion factor to meters
+if mesh_unit == "mm":
+    scale = 0.001
+elif mesh_unit == "cm":
+    scale = 0.01
+elif mesh_unit == "in":
+    scale = 0.0254
+
 nodes = []
 for node in mesh_data.Nodes:
-    nodes.append([node.Id, node.X, node.Y, node.Z])
+    nodes.append([node.Id, node.X * scale, node.Y * scale, node.Z * scale])
 
 # Extract Elements
 elements = []
@@ -231,51 +256,94 @@ S_gammaO = S_gammaO @ R_gammaO
 x_gammaO, y_gammaO, z_gammaO = S_gammaO[:, 0], S_gammaO[:, 1], S_gammaO[:, 2]
 r_gammaO, lat_gammaO, lon_gammaO = pySDEM.cart_to_lat_lon(x_gammaO, y_gammaO, z_gammaO)
 
-# Process Internal
-gammaI, mapping_workflow_internal = pySTM.check_genus_zero_and_map_if_needed(
-    gammaI_from_ansys, "INTERNAL", SHRINK_WRAP_STL_INTERNAL
-)
-original_points_gammaI = gammaI.grid.points.copy()
-grid_gammaI = gammaI.grid.clean(remove_unused_points=True).compute_cell_sizes(length=False, area=True, volume=False)
-v_gammaI = grid_gammaI.points
-f_gammaI = grid_gammaI.cells_dict[list(grid_gammaI.cells_dict)[0]]
-population_gammaI = grid_gammaI["Area"]
+# Process Internal only if SH_basis or SVD_basis
+if SH_basis or SVD_basis:
+    gammaI, mapping_workflow_internal = pySTM.check_genus_zero_and_map_if_needed(
+        gammaI_from_ansys, "INTERNAL", SHRINK_WRAP_STL_INTERNAL
+    )
+    original_points_gammaI = gammaI.grid.points.copy()
+    grid_gammaI = gammaI.grid.clean(remove_unused_points=True).compute_cell_sizes(length=False, area=True, volume=False)
+    v_gammaI = grid_gammaI.points
+    f_gammaI = grid_gammaI.cells_dict[list(grid_gammaI.cells_dict)[0]]
+    population_gammaI = grid_gammaI["Area"]
 
-S_gammaI = pySDEM.SphericalDensityEqualizingMap(v_gammaI, f_gammaI, population_gammaI)
-R_gammaI, _ = pySDEM.optimal_rotation(v_gammaI, S_gammaI)
-S_gammaI = S_gammaI @ R_gammaI
-x_gammaI, y_gammaI, z_gammaI = S_gammaI[:, 0], S_gammaI[:, 1], S_gammaI[:, 2]
-r_gammaI, lat_gammaI, lon_gammaI = pySDEM.cart_to_lat_lon(x_gammaI, y_gammaI, z_gammaI)
+    S_gammaI = pySDEM.SphericalDensityEqualizingMap(v_gammaI, f_gammaI, population_gammaI)
+    R_gammaI, _ = pySDEM.optimal_rotation(v_gammaI, S_gammaI)
+    S_gammaI = S_gammaI @ R_gammaI
+    x_gammaI, y_gammaI, z_gammaI = S_gammaI[:, 0], S_gammaI[:, 1], S_gammaI[:, 2]
+    r_gammaI, lat_gammaI, lon_gammaI = pySDEM.cart_to_lat_lon(x_gammaI, y_gammaI, z_gammaI)
 
+if CUSTOM_basis:
+    v_gammaI = np.array(gammaI_from_ansys.nodes.coordinates_field.data)
+    S_gammaI = v_gammaI
+    grid_gammaI = gammaI_from_ansys.grid.compute_cell_sizes()
+    gammaI = gammaI_from_ansys
+    
+    
 # =============================================================================
-# BASIS GENERATION (SVD OR STANDARD, INCLUDES MONOPOLE)
+# BASIS GENERATION
 # =============================================================================
 normals_O = kdpf.get_normals(gammaO_from_ansys)
 tfreq = None  
 vn_list = []
 
-if (SVD_basis+SH_basis) == 1:
-    if SVD_basis:
-        print("\nUsing Custom SVD Augmented Basis...")
-        full_basis_array, n_coeffs_I = pySTM.generate_svd_augmented_basis(
-            lmax_I, S_gammaI, lat_gammaI, lon_gammaI, v_gammaI, pressure_for_svd
-        )
-        n_harmonics = n_coeffs_I
-        basis_labels = [f"SVD_Basis_{i}" for i in range(n_coeffs_I)]
-        basis_type = 'svd_augmented'
-    elif SH_basis:
-        print("\nUsing Standard Spherical Harmonics Basis (Including Monopole)...")
-        sh_array, n_harmonics = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat_gammaI, lon_gammaI)
-        n_coeffs_I = (lmax_I + 1) ** 2
-        monopole_array = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
-        full_basis_array = np.hstack((monopole_array, sh_array))
-        
-        basis_labels = [f"Y_{l}_{m}" for l in range(lmax_I + 1) for m in range(-l, l + 1)]
-        basis_type = 'spherical_harmonics'
-    else:
-        print("*** ERROR: Basis not defined ***")
+if SVD_basis:
+    print("\nUsing Custom SVD Augmented Basis...")
+    full_basis_array, n_coeffs_I = pySTM.generate_svd_augmented_basis(
+        lmax_I, S_gammaI, lat_gammaI, lon_gammaI, v_gammaI, pressure_for_svd
+    )
+    n_harmonics = n_coeffs_I
+    basis_labels = [f"SVD_Basis_{i}" for i in range(n_coeffs_I)]
+    basis_type = 'svd_augmented'
+    file_pattern = "SVD_Basis_{i}"
     
+elif SH_basis:
+    print("\nUsing Standard Spherical Harmonics Basis (Including Monopole)...")
+    sh_array, n_harmonics = pySTM.generate_spherical_harmonics(lmax_I, S_gammaI, lat_gammaI, lon_gammaI)
+    n_coeffs_I = (lmax_I + 1) ** 2
+    monopole_array = np.ones((sh_array.shape[0], 1), dtype=np.complex128)
+    full_basis_array = np.hstack((monopole_array, sh_array))
+    
+    basis_labels = [f"Y_{l}_{m}" for l in range(lmax_I + 1) for m in range(-l, l + 1)]
+    basis_type = 'spherical_harmonics'
+    file_pattern = "Y_{l}_{m}"
+    
+elif CUSTOM_basis:
+    print(f"\nUsing Custom Basis from {custom_basis_csv}...")
+    full_basis_array_with_xyz = np.genfromtxt(custom_basis_csv, delimiter=',',skip_header=1)
+    full_basis_array = full_basis_array_with_xyz[:,3:]
+    n_coeffs_I = np.shape(full_basis_array)[1]
+    n_harmonics = n_coeffs_I
+    
+    basis_labels = [f"Custom_Basis_{i}" for i in range(n_coeffs_I)]
+    basis_type = f'Custom Basis, {custom_basis_csv}'
+    file_pattern = "Custom_Basis_{i}"
+    
+    # print(f"\nUsing Custom Basis from {custom_basis_csv}...")
+    # full_basis_array_with_xyz = np.genfromtxt(custom_basis_csv, delimiter=',', skip_header=1)
+    
+    # csv_coords = full_basis_array_with_xyz[:, :3] 
+    # raw_basis_array = full_basis_array_with_xyz[:, 3:]
+    
+    # tree = cKDTree(csv_coords)
+    # distances, mapped_indices = tree.query(v_gammaI)
+    
+    # max_dist = np.max(distances)
+    # if max_dist > 1e-4:
+    #     print(f"WARNING: Max mapping distance is {max_dist:.6f}. Check if CSV coordinates are in mm while mesh is in m.")
         
+    # full_basis_array = raw_basis_array[mapped_indices]
+    
+    # n_coeffs_I = np.shape(full_basis_array)[1]
+    # n_harmonics = n_coeffs_I
+    
+    # basis_labels = [f"Custom_Basis_{i}" for i in range(n_coeffs_I)]
+    # basis_type = f'Custom Basis, {custom_basis_csv}'
+    # file_pattern = "Custom_Basis_{i}"
+    
+else:
+    raise Exception("Excitation type not defined")
+
 
 allfiles = pySTM.export_named_fields(
     basis_labels, np.real(full_basis_array), np.imag(full_basis_array), 
@@ -397,7 +465,7 @@ results_data = {
     'STM': STM,
     'G': G,
     'frequencies': tfreq.data,
-    'export_files': {'harmonic_files': allfiles, 'n_files_exported': len(allfiles), 'file_pattern': 'Y_l_m.csv' if not BASIS_AUGMENTATION_PRESSURE else 'SVD_Basis_i.csv'},
+    'export_files': {'harmonic_files': allfiles, 'n_files_exported': len(allfiles), 'file_pattern': file_pattern},
     'point_mappings': {'point_mapping': np.array(point_mapping_gammaO), 'n_original_points': len(original_points_gammaO),
                        'n_cleaned_points': len(v_gammaO)},
     'error_data': {

@@ -120,8 +120,7 @@ class STMSynthesizer:
             "n_frequencies": self.n_frequencies,
             "frequency_range_hz": (fmin, fmax),
             "n_internal_points": self.gammaI_points.shape[0] if self.gammaI_points.size else None,
-            "n_external_points": self._external_points.shape[0] if self._external_points is not None else None,
-            "has_error_data": self.has_error_data,
+            "n_external_points": self._external_points.shape[0] if self._external_points is not None else None
         }
         if self.lmax_I is not None:
             summary_dict["lmax_I"] = self.lmax_I

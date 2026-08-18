@@ -8,11 +8,11 @@ from pySTM.excitation_handler import frequency_independent_excitation_from_csv, 
 # pressure_csv = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv"
 # evaluate_basis_truncation_error()
 
-STM_FILEPATH = r"C:/01_gitrepos/STM/test.h5"
+STM_FILEPATH = r"C:\01_gitrepos\STM\motor.h5"
 
 STM = STMSynthesizer.from_file(STM_FILEPATH)
 
-# excitation = excitation_from_array(STM,np.array([1+0j,1+0j,0+2j,1-1j]),export_csv_path="testpressure.csv")
+excitation = excitation_from_array(STM,np.array([0,1]),export_csv_path="testpressure.csv")
 
 
 print("\n--- STM Summary ---")
@@ -20,21 +20,21 @@ for key, val in STM.summary().items():
     print(f"{key:>20}: {val}")
 
 
-CSV_FILEPATH = r"N:\PhD\STM\TP\high_flow_total_pressure.csv" 
-excitation, error_percent = frequency_independent_excitation_from_csv(
-    stm_synthesizer=STM,
-    csv_filepath=CSV_FILEPATH,
-    num_neighbors=3,
-    p=2,
-    plot=True,              
-    plot_part="abs"
-)
+# CSV_FILEPATH = r"N:\PhD\STM\TP\high_flow_total_pressure.csv" 
+# excitation, error_percent = frequency_independent_excitation_from_csv(
+#     stm_synthesizer=STM,
+#     csv_filepath=CSV_FILEPATH,
+#     num_neighbors=3,
+#     p=2,
+#     plot=True,              
+#     plot_part="abs"
+# )
 # %%
 
 
 
 
-# plot_freq_index = 5
+plot_freq_index = 0
 # NNI = STM.synthesize_intensity(excitation,method="NNI",plot=True,plot_freq_index=plot_freq_index)
 
 
@@ -43,10 +43,10 @@ total_power_db = power_data["total_db"]
 
 
 
-# STM.plot_power_spectrum(
-#     excitation,
-#     title="Far-field Sound Power Levels"
-# )
+STM.plot_power_spectrum(
+    excitation,
+    title="Far-field Sound Power Levels"
+)
 
 # if STM.has_error_data:
 #     STM.plot_error_spectrum(

@@ -314,6 +314,7 @@ with Transaction():
     importedPres = usedimportedloadobj.AddImportedPressure()
     importedPres.Location = namedsel_internal
     importedPres.Name = "{filename}"
+    importedPres.PropertyByName("ExternalLoadScopingType").InternalValue = 1 #THIS SETS CORNER NODES
     table = importedPres.GetTableByName("")
     table[0][0] = "File{fileid}:" + "{filename}" + "_real"
     table[0][1] = "File{fileid}:" + "{filename}" + "_imag"
