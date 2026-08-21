@@ -5,15 +5,15 @@ from ansys.mechanical.core import connect_to_mechanical
 import numpy as np
 import os
 
-workbench_server_port = 37021 # StartServer() to retrieve port
+workbench_server_port = 3732 # StartServer() to retrieve port
 workbench_server_ip = None
 systemName          = "SYS"
 
 INTERNAL_NS = "GI"
 
 # --- USER INPUTS FOR HARMONICS ---
-number_of_stator_teeth = 30  # UPDATE THIS with your actual number of teeth
-max_harmonic = 1             # UPDATE THIS with your desired highest harmonic
+number_of_stator_teeth = 48  # UPDATE THIS with your actual number of teeth
+max_harmonic = 8             # UPDATE THIS with your desired highest harmonic
 output_filename = r"C:\01_gitrepos\STM\stator_harmonic_loads.csv"
 # ---------------------------------
 

@@ -8,11 +8,11 @@ from pySTM.excitation_handler import frequency_independent_excitation_from_csv, 
 # pressure_csv = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv"
 # evaluate_basis_truncation_error()
 
-STM_FILEPATH = r"C:\01_gitrepos\STM\motor.h5"
+STM_FILEPATH = r"N:\PhD\motor_noise\stms\base.h5"
 
 STM = STMSynthesizer.from_file(STM_FILEPATH)
 
-excitation = excitation_from_array(STM,np.array([0,1]),export_csv_path="testpressure.csv")
+excitation = excitation_from_array(STM,np.array([1,0,0,0,0,0,0,0,0]))
 
 
 print("\n--- STM Summary ---")

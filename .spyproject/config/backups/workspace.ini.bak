@@ -4,7 +4,7 @@ save_data_on_exit = True
 save_history = True
 save_non_project_files = False
 project_type = 'empty-project-type'
-recent_files = ['example_analysis_using_stm.py', 'STM_main_WORKING_MONOPOLE_SOLVE.py', 'pySTM\\excitation_handler.py', 'pySTM\\stm_result_handler.py']
+recent_files = ['STM_main.py', '\\\\10.0.230.26\\home\\PhD\\motor_noise\\stm_analysis.py']
 
 [main]
 version = 0.2.0

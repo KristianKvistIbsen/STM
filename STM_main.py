@@ -11,9 +11,6 @@ import kdpf
 import pySDEM
 import pySTM
 
-# =============================================================================
-# USER SETTINGS
-# =============================================================================
 
 # Workbench server port (and IPv4, if not on localhost 127.0.0.1)
 # ---------------------------------------------------------------------- #
@@ -22,13 +19,13 @@ import pySTM
 #       In command window: StartServer()                                 #
 #           Returned number is inserted below as workbench_server_port   #
 # ---------------------------------------------------------------------- #
-workbench_server_port = 37021 # StartServer() to retrieve port
+workbench_server_port = 3732
 workbench_server_ip = None
 
 # ANSYS settings
 model_folder            = None  # Defaults to dp0/MECH of system if None
 pressure_export_folder  = None  # Defaults to model_folder if None
-nCores                  = 8
+nCores                  = 64
 # Pressure File Import Settings
 systemName          = "SYS" #Name of the system where data is imported
 DataExtension       = "csv" # CSV format
@@ -39,14 +36,14 @@ LengthUnit          = "m" # Must be m! Implement unit conversion if not m
 PressureUnit        = "Pa" # Must be Pa! Implement unit conversion if not Pa
 
 # STM settings
-STM_NAME    = "motor" # Name of outputted STM file
+STM_NAME    = "dIR_minus" # Name of outputted STM file
 INTERNAL_NS = 'GI' # Named selection of inner (pressure loaded) surface
 EXTERNAL_NS = 'GE' # Named selection of outer (sound radiating) surface
-lmax_O      = 80   # Highest degree of SH used for decomposing outer surface
+lmax_O      = 60   # Highest degree of SH used for decomposing outer surface
 
 # .stl for representing inner and outer surfaces, if they are not water tight
 SHRINK_WRAP_STL_INTERNAL = None
-SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\motor_noise\shrinkwrap.stl"
+SHRINK_WRAP_STL_EXTERNAL = None
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005 #Mapping radius between surface and stl
 
 # Sphesrical harmonic load definition
@@ -59,7 +56,7 @@ lmax_I   = 1    # Highest degre of SH used for excitation
 #  SH basis. Then performs SVD to retrieve an augmented SH basis)
 SVD_basis        = False
 lmax_I           = 1
-pressure_for_svd = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv" 
+pressure_for_svd = None #r"N:\PhD\STM\TP\simple_flow_total_pressure.csv" 
 
 # Custom basis
 # (Entirely custom basis. Must be made explicitly on mesh of analyzed geometry.
@@ -67,15 +64,18 @@ pressure_for_svd = r"N:\PhD\STM\TP\simple_flow_total_pressure.csv"
 CUSTOM_basis = True
 custom_basis_csv = r"C:/01_gitrepos/STM/stator_harmonic_loads.csv"
 
+
+# ====================== 🛑 STOP: HANDS OFF 🛑 ===============================
+
 # =============================================================================
 # CONFIG VALIDATION
 # =============================================================================
 if not (SH_basis+SVD_basis+CUSTOM_basis) == 1:
     raise Exception("Please only define one excitation type")
 elif not PressureUnit=="Pa":
-    raise Exception("Pressure unit must be Pa (Son, In my house we use MKS)")
+    raise Exception("Pressure unit must be Pa (Son, In my house we use MKS.)")
 elif not LengthUnit=="m":
-    raise Exception("Length unit must be m (Son, In my house we use MKS)")    
+    raise Exception("Length unit must be m (Son, In my house we use MKS.)")    
     
 
 # =============================================================================
@@ -94,7 +94,7 @@ if model_folder is None:
 model = ExtAPI.DataModel.Project.Model
 harmonics = [a for a in model.Analyses if "Harmonic" in a.AnalysisType.ToString()]
 if len(harmonics) == 0:
-    raise Exception("No Harmonic Response analysis found in the shared Mechanical model.")
+    raise Exception("No Harmonic analysis found in the shared Mechanical model.")
 h = harmonics[0]
 _wd = None
 for _attr in ["WorkingDir", "SolverFilesDirectory"]:
