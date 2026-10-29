@@ -5,7 +5,7 @@ from ansys.mechanical.core import connect_to_mechanical
 import numpy as np
 import os
 
-workbench_server_port = 3732 # StartServer() to retrieve port
+workbench_server_port = 30211 # StartServer() to retrieve port
 workbench_server_ip = None
 systemName          = "SYS"
 
@@ -186,8 +186,6 @@ v = centered_coords[:, ortho_axes[1]]
 # Calculate theta from -pi to pi
 theta = np.arctan2(v, u)
 
-
-
 # Anti-aliasing check based on Nyquist limit
 nyquist_limit = number_of_stator_teeth // 2
 if max_harmonic > nyquist_limit:
@@ -199,16 +197,23 @@ if max_harmonic > nyquist_limit:
 output_data = coords.copy()
 header_cols = ["x", "y", "z"]
 
-# p0: Constant force component (0th harmonic)
+# p0: Constant force component (Monopole / 0th harmonic)
 p0 = np.ones_like(theta)
 output_data = np.column_stack((output_data, p0))
 header_cols.append("p0")
 
-# p1 to pk: sin(k*theta)
+# p1: Dipole component (1st harmonic)
+p1 = np.sin(theta)
+output_data = np.column_stack((output_data, p1))
+header_cols.append("p1")
+
+# p_sum: Sum of all sine harmonics up to max_harmonic
+p_sum = np.zeros_like(theta)
 for k in range(1, max_harmonic + 1):
-    pk = np.sin(k * theta)
-    output_data = np.column_stack((output_data, pk))
-    header_cols.append(f"p{k}")
+    p_sum += np.sin(k * theta)
+    
+output_data = np.column_stack((output_data, p_sum))
+header_cols.append("p_sum")
 
 # =============================================================================
 # EXPORT TO CSV
@@ -225,7 +230,7 @@ np.savetxt(
     fmt="%.6e"
 )
 
-print(f"Successfully generated {max_harmonic} harmonics.")
+print(f"Successfully generated monopole, dipole, and sum up to {max_harmonic} harmonics.")
 print(f"Saved load profile to: {os.path.abspath(output_filename)}")
 
-# gammaI_from_ansys.grid.plot(scalars=pk)
+# gammaI_from_ansys.grid.plot(scalars=p_sum)
