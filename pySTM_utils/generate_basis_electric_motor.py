@@ -197,25 +197,7 @@ p0 = np.ones_like(theta)
 columns.append(p0)
 header_cols.append("p0")
 
-# Harmonics k = 1 ... max_harmonic (both Cosine and Sine components)
-p_sum = p0.copy()  # Optional combined column for visual inspection
-for k in range(1, max_harmonic + 1):
-    pk_cos = np.cos(k * theta)
-    pk_sin = np.sin(k * theta)
-    
-    columns.append(pk_cos)
-    header_cols.append(f"p{k}_cos")
-    
-    columns.append(pk_sin)
-    header_cols.append(f"p{k}_sin")
-    
-    p_sum += pk_cos + pk_sin
-
-# Optional: append p_sum at the end for quick verification plotting
-columns.append(p_sum)
-header_cols.append("p_sum")
-
-# Stack all columns in a single allocation: shape (N_nodes, 3 + (2*max_harmonic + 1) + 1)
+# Stack all columns in a single allocation: shape (N_nodes, 3 + (2*max_harmonic + 1))
 output_data = np.column_stack(columns)
 
 # =============================================================================
@@ -236,4 +218,25 @@ num_basis_modes = 2 * max_harmonic + 1
 print(f"Successfully generated complete basis ({num_basis_modes} modes up to harmonic {max_harmonic}).")
 print(f"Saved load profile to: {os.path.abspath(output_filename)}")
 
+
+
+# %%
+
+
 # gammaI_from_ansys.grid.plot(scalars=p_sum)
+
+
+
+# %%
+
+p_actual = r""
+
+# B has shape (N_nodes, 2 * max_harmonic + 1): columns [p0, p1_cos, p1_sin, ..., pM_cos, pM_sin]
+B = output_data[:, 3:-1]  # Exclude x, y, z and the trailing p_sum column
+
+# p_actual has shape (N_nodes,) - radial pressure from Maxwell mapped to the GI nodes
+# Solve for the exact superposition weights w = [a0, a1, b1, ..., aM, bM]
+weights, residuals, rank, s = np.linalg.lstsq(B, p_actual, rcond=None)
+
+# Reconstructed pressure on the teeth:
+p_reconstructed = B @ weights

@@ -43,7 +43,7 @@ lmax_O      = 60   # Highest degree of SH used for decomposing outer surface
 
 # .stl for representing inner and outer surfaces, if they are not water tight
 SHRINK_WRAP_STL_INTERNAL = None
-SHRINK_WRAP_STL_EXTERNAL = None
+SHRINK_WRAP_STL_EXTERNAL = r"N:\PhD\ORBIT_HYPERSPACE\motor_geometry\STMROM_stator_housing_wrap.scdocx.stl"
 SHRINK_WRAP_MAP_FILTER_RADIUS = 0.005 #Mapping radius between surface and stl
 
 # Sphesrical harmonic load definition
