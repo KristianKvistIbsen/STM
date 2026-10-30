@@ -19,13 +19,13 @@ import pySTM
 #       In command window: StartServer()                                 #
 #           Returned number is inserted below as workbench_server_port   #
 # ---------------------------------------------------------------------- #
-workbench_server_port = 3732
+workbench_server_port = 38145
 workbench_server_ip = None
 
 # ANSYS settings
 model_folder            = None  # Defaults to dp0/MECH of system if None
 pressure_export_folder  = None  # Defaults to model_folder if None
-nCores                  = 64
+nCores                  = 16
 # Pressure File Import Settings
 systemName          = "SYS" #Name of the system where data is imported
 DataExtension       = "csv" # CSV format
@@ -36,9 +36,9 @@ LengthUnit          = "m" # Must be m! Implement unit conversion if not m
 PressureUnit        = "Pa" # Must be Pa! Implement unit conversion if not Pa
 
 # STM settings
-STM_NAME    = "dIR_minus" # Name of outputted STM file
-INTERNAL_NS = 'GI' # Named selection of inner (pressure loaded) surface
-EXTERNAL_NS = 'GE' # Named selection of outer (sound radiating) surface
+STM_NAME    = "ORBITv1" # Name of outputted STM file
+INTERNAL_NS = 'TEETH' # Named selection of inner (pressure loaded) surface
+EXTERNAL_NS = 'FSI' # Named selection of outer (sound radiating) surface
 lmax_O      = 60   # Highest degree of SH used for decomposing outer surface
 
 # .stl for representing inner and outer surfaces, if they are not water tight
@@ -62,7 +62,7 @@ pressure_for_svd = None #r"N:\PhD\STM\TP\simple_flow_total_pressure.csv"
 # (Entirely custom basis. Must be made explicitly on mesh of analyzed geometry.
 #  Find example code for producing such a basis in pySTM_utils)
 CUSTOM_basis = True
-custom_basis_csv = r"C:/01_gitrepos/STM/stator_harmonic_loads.csv"
+custom_basis_csv = r"N:\PhD\ORBIT_HYPERSPACE\ORBIT_harmonic_STM_basis_m4.csv"
 
 
 # ====================== 🛑 STOP: HANDS OFF 🛑 ===============================
@@ -83,7 +83,8 @@ elif not LengthUnit=="m":
 # =============================================================================
 workbench = connect_workbench(
     port=workbench_server_port,
-    host=workbench_server_ip if workbench_server_ip else None
+    host=workbench_server_ip if workbench_server_ip else None,
+    security="insecure"
 )
 mechPort = workbench.start_mechanical_server(systemName)
 mechanical = connect_to_mechanical(ip='localhost', port=mechPort)

@@ -1,30 +1,29 @@
 import json
+import os
+import numpy as np
 from ansys.dpf import core as dpf
 from ansys.workbench.core import connect_workbench
 from ansys.mechanical.core import connect_to_mechanical
-import numpy as np
-import os
 
-workbench_server_port = 30211 # StartServer() to retrieve port
+workbench_server_port = 38145  # StartServer() to retrieve port
 workbench_server_ip = None
-systemName          = "SYS"
+systemName = "SYS"
 
-INTERNAL_NS = "GI"
+INTERNAL_NS = "TEETH"
 
 # --- USER INPUTS FOR HARMONICS ---
 number_of_stator_teeth = 48  # UPDATE THIS with your actual number of teeth
-max_harmonic = 8             # UPDATE THIS with your desired highest harmonic
-output_filename = r"C:\01_gitrepos\STM\stator_harmonic_loads.csv"
+max_harmonic = 4             # UPDATE THIS with your desired highest harmonic
+output_filename = r"N:\PhD\ORBIT_HYPERSPACE\ORBIT_harmonic_STM_basis_m4.csv"
 # ---------------------------------
-
 
 workbench = connect_workbench(
     port=workbench_server_port,
-    host=workbench_server_ip if workbench_server_ip else None
+    host=workbench_server_ip if workbench_server_ip else None,
+    security="insecure"
 )
 mechPort = workbench.start_mechanical_server(systemName)
 mechanical = connect_to_mechanical(ip='localhost', port=mechPort)
-
 
 # =============================================================================
 # MESH EXTRACTION (IRONPYTHON -> JSON)
@@ -33,7 +32,6 @@ print("Extracting mesh data from Mechanical memory...")
 extraction_script = f"""
 import json
 mesh_data = ExtAPI.DataModel.MeshDataByName("Global")
-
 
 # Extract Nodes
 mesh_unit = mesh_data.Unit.lower()
@@ -135,7 +133,7 @@ for elem_data in data["elements"]:
     elif shape == "beam":
         mesh.elements.add_beam_element(elem_id, conn)
 
-mesh.unit = "m" 
+mesh.unit = "m"
 
 # =============================================================================
 # EXTRACT SKIN MESHES (INTERNAL & EXTERNAL)
@@ -156,15 +154,13 @@ gammaI_from_ansys = extract_skin_for_ns(INTERNAL_NS, mesh, data)
 # =============================================================================
 print("Processing node coordinates to identify rotation axis...")
 
-# DPFArray can be safely cast to a numpy array for vectorized math
 coords = np.asarray(gammaI_from_ansys.nodes.coordinates_field.data)
 
-# Center the coordinates based on the bounding box center
+# Center the coordinates based on the mean center
 centroid = np.mean(coords, axis=0)
 centered_coords = coords - centroid
 
-# Identify the rotation axis by finding the axis with the minimum radial variance.
-# R = sqrt(u^2 + v^2) where u and v are the orthogonal axes.
+# Identify the rotation axis by finding the axis with the minimum radial variance
 var_r = []
 for axis in range(3):
     ortho_axes = [i for i in range(3) if i != axis]
@@ -176,9 +172,8 @@ axis_names = ['X', 'Y', 'Z']
 print(f"Identified motor rotation axis: {axis_names[rot_axis_idx]}")
 
 # =============================================================================
-# CALCULATE THETA AND SPATIAL HARMONICS
+# CALCULATE THETA AND COMPLETE SPATIAL FOURIER BASIS (COS & SIN)
 # =============================================================================
-# Extract the orthogonal axes to calculate the angular position (theta)
 ortho_axes = [i for i in range(3) if i != rot_axis_idx]
 u = centered_coords[:, ortho_axes[0]]
 v = centered_coords[:, ortho_axes[1]]
@@ -186,39 +181,46 @@ v = centered_coords[:, ortho_axes[1]]
 # Calculate theta from -pi to pi
 theta = np.arctan2(v, u)
 
-# Anti-aliasing check based on Nyquist limit
+# Anti-aliasing check based on spatial Nyquist limit
 nyquist_limit = number_of_stator_teeth // 2
 if max_harmonic > nyquist_limit:
     print(f"WARNING: max_harmonic ({max_harmonic}) exceeds the spatial Nyquist limit ({nyquist_limit}) for {number_of_stator_teeth} teeth.")
     print(f"Harmonics above {nyquist_limit} will alias. Clamping max_harmonic to {nyquist_limit}.")
     max_harmonic = nyquist_limit
 
-# Initialize the output matrix with x, y, z coordinates
-output_data = coords.copy()
+# Build list of columns and headers
+columns = [coords[:, 0], coords[:, 1], coords[:, 2]]
 header_cols = ["x", "y", "z"]
 
-# p0: Constant force component (Monopole / 0th harmonic)
+# 0th harmonic (Monopole / breathing mode): cos(0*theta) = 1
 p0 = np.ones_like(theta)
-output_data = np.column_stack((output_data, p0))
+columns.append(p0)
 header_cols.append("p0")
 
-# p1: Dipole component (1st harmonic)
-p1 = np.sin(theta)
-output_data = np.column_stack((output_data, p1))
-header_cols.append("p1")
-
-# p_sum: Sum of all sine harmonics up to max_harmonic
-p_sum = np.zeros_like(theta)
+# Harmonics k = 1 ... max_harmonic (both Cosine and Sine components)
+p_sum = p0.copy()  # Optional combined column for visual inspection
 for k in range(1, max_harmonic + 1):
-    p_sum += np.sin(k * theta)
+    pk_cos = np.cos(k * theta)
+    pk_sin = np.sin(k * theta)
     
-output_data = np.column_stack((output_data, p_sum))
+    columns.append(pk_cos)
+    header_cols.append(f"p{k}_cos")
+    
+    columns.append(pk_sin)
+    header_cols.append(f"p{k}_sin")
+    
+    p_sum += pk_cos + pk_sin
+
+# Optional: append p_sum at the end for quick verification plotting
+columns.append(p_sum)
 header_cols.append("p_sum")
+
+# Stack all columns in a single allocation: shape (N_nodes, 3 + (2*max_harmonic + 1) + 1)
+output_data = np.column_stack(columns)
 
 # =============================================================================
 # EXPORT TO CSV
 # =============================================================================
-
 header_str = ",".join(header_cols)
 
 np.savetxt(
@@ -230,7 +232,8 @@ np.savetxt(
     fmt="%.6e"
 )
 
-print(f"Successfully generated monopole, dipole, and sum up to {max_harmonic} harmonics.")
+num_basis_modes = 2 * max_harmonic + 1
+print(f"Successfully generated complete basis ({num_basis_modes} modes up to harmonic {max_harmonic}).")
 print(f"Saved load profile to: {os.path.abspath(output_filename)}")
 
 # gammaI_from_ansys.grid.plot(scalars=p_sum)
